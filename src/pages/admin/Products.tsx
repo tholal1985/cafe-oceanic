@@ -47,6 +47,8 @@ export default function Products() {
     recipe: '',
     display_order: 0,
     is_available: true,
+    ultimatepos_id: null as number | null,
+    ultimatepos_variation_id: null as number | null,
   });
 
   const [packs, setPacks] = useState<ProductPack[]>([]);
@@ -206,6 +208,8 @@ export default function Products() {
       recipe: '',
       display_order: 0,
       is_available: true,
+      ultimatepos_id: null,
+      ultimatepos_variation_id: null,
     });
     fetchProducts();
   };
@@ -221,6 +225,8 @@ export default function Products() {
       recipe: product.recipe || '',
       display_order: product.display_order,
       is_available: product.is_available,
+      ultimatepos_id: product.ultimatepos_id ?? null,
+      ultimatepos_variation_id: product.ultimatepos_variation_id ?? null,
     });
     await fetchProductAddons(product.id);
     await fetchProductCategories(product.id);
@@ -1011,6 +1017,37 @@ export default function Products() {
                     }
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
                   />
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      UltimatePOS Product ID
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.ultimatepos_id ?? ''}
+                      onChange={(e) =>
+                        setFormData({ ...formData, ultimatepos_id: e.target.value ? parseInt(e.target.value) : null })
+                      }
+                      placeholder="Auto-linked on sync"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      UltimatePOS Variation ID
+                    </label>
+                    <input
+                      type="number"
+                      value={formData.ultimatepos_variation_id ?? ''}
+                      onChange={(e) =>
+                        setFormData({ ...formData, ultimatepos_variation_id: e.target.value ? parseInt(e.target.value) : null })
+                      }
+                      placeholder="Optional"
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    />
+                  </div>
                 </div>
 
                 <div className="flex items-center gap-2">

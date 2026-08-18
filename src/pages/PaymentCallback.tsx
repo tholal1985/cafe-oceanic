@@ -5,6 +5,7 @@ import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { PaymentService } from '../lib/paymentService';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
+import { pushOrderToUltimatePos } from '../lib/ultimateposService';
 
 export default function PaymentCallback() {
   const navigate = useNavigate();
@@ -66,6 +67,8 @@ export default function PaymentCallback() {
           setOrderNumber(order.order_number);
           clearCart();
 
+          pushOrderToUltimatePos(order.id).catch((err) => console.error('UltimatePOS push failed:', err));
+
           setTimeout(() => {
             navigate('/order-confirmation', {
               state: { orderId: order.id, orderNumber: order.order_number }
@@ -90,6 +93,8 @@ export default function PaymentCallback() {
           setOrderNumber(order.order_number);
           clearCart();
 
+          pushOrderToUltimatePos(order.id).catch((err) => console.error('UltimatePOS push failed:', err));
+
           setTimeout(() => {
             navigate('/order-confirmation', {
               state: { orderId: order.id, orderNumber: order.order_number }
@@ -111,6 +116,8 @@ export default function PaymentCallback() {
         setStatus('success');
         setOrderNumber(order.order_number);
         clearCart();
+
+        pushOrderToUltimatePos(order.id).catch((err) => console.error('UltimatePOS push failed:', err));
 
         setTimeout(() => {
           navigate('/order-confirmation', {

@@ -174,6 +174,8 @@ export interface Database {
           is_available: boolean;
           display_order: number;
           recipe: string | null;
+          ultimatepos_id: number | null;
+          ultimatepos_variation_id: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -188,6 +190,8 @@ export interface Database {
           is_available?: boolean;
           display_order?: number;
           recipe?: string | null;
+          ultimatepos_id?: number | null;
+          ultimatepos_variation_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -202,6 +206,8 @@ export interface Database {
           is_available?: boolean;
           display_order?: number;
           recipe?: string | null;
+          ultimatepos_id?: number | null;
+          ultimatepos_variation_id?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -503,6 +509,138 @@ export interface Database {
           error_message?: string | null;
           external_message_id?: string | null;
           sent_at?: string | null;
+          created_at?: string;
+        };
+      };
+      ultimatepos_config: {
+        Row: {
+          id: string;
+          base_url: string;
+          client_id: string;
+          client_secret: string;
+          api_token: string;
+          api_username: string;
+          api_password: string;
+          auth_method: 'oauth' | 'token' | 'password';
+          business_id: number | null;
+          location_id: number | null;
+          is_enabled: boolean;
+          auto_push_orders: boolean;
+          auto_sync_products: boolean;
+          last_product_sync_at: string | null;
+          last_connected_at: string | null;
+          connection_status: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          base_url?: string;
+          client_id?: string;
+          client_secret?: string;
+          api_token?: string;
+          api_username?: string;
+          api_password?: string;
+          auth_method?: 'oauth' | 'token' | 'password';
+          business_id?: number | null;
+          location_id?: number | null;
+          is_enabled?: boolean;
+          auto_push_orders?: boolean;
+          auto_sync_products?: boolean;
+          last_product_sync_at?: string | null;
+          last_connected_at?: string | null;
+          connection_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          base_url?: string;
+          client_id?: string;
+          client_secret?: string;
+          api_token?: string;
+          api_username?: string;
+          api_password?: string;
+          auth_method?: 'oauth' | 'token' | 'password';
+          business_id?: number | null;
+          location_id?: number | null;
+          is_enabled?: boolean;
+          auto_push_orders?: boolean;
+          auto_sync_products?: boolean;
+          last_product_sync_at?: string | null;
+          last_connected_at?: string | null;
+          connection_status?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      ultimatepos_order_log: {
+        Row: {
+          id: string;
+          order_id: string | null;
+          order_number: string | null;
+          ultimatepos_sale_id: number | null;
+          status: string;
+          error_message: string | null;
+          request_payload: Json;
+          response_payload: Json;
+          pushed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id?: string | null;
+          order_number?: string | null;
+          ultimatepos_sale_id?: number | null;
+          status?: string;
+          error_message?: string | null;
+          request_payload?: Json;
+          response_payload?: Json;
+          pushed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string | null;
+          order_number?: string | null;
+          ultimatepos_sale_id?: number | null;
+          status?: string;
+          error_message?: string | null;
+          request_payload?: Json;
+          response_payload?: Json;
+          pushed_at?: string | null;
+          created_at?: string;
+        };
+      };
+      ultimatepos_sync_log: {
+        Row: {
+          id: string;
+          sync_type: string;
+          status: string;
+          items_synced: number;
+          error_message: string | null;
+          started_at: string | null;
+          completed_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sync_type?: string;
+          status?: string;
+          items_synced?: number;
+          error_message?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          sync_type?: string;
+          status?: string;
+          items_synced?: number;
+          error_message?: string | null;
+          started_at?: string | null;
+          completed_at?: string | null;
           created_at?: string;
         };
       };
