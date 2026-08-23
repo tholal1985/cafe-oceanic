@@ -267,6 +267,7 @@ async function pushOrder(supabase: any, body: any) {
       location_id: config.location_id || 1,
       status: "final",
       payment_status: "paid",
+      contact_id: "CO0001",
       sell_lines: sellLines,
       payment: [
         {
