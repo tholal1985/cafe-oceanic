@@ -2,11 +2,10 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, ArrowRight, ChefHat, Check, Clock, CreditCard as Edit2, Home, Minus,
-  Package, Phone, Plus, RefreshCw, Search, ShoppingBag, Trash2, X,
+  Package, Phone, Plus, Search, ShoppingBag, Trash2, X,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import type { Database } from '../../lib/database.types';
-import { pushOrderToUltimatePos } from '../../lib/ultimateposService';
 
 type Order = Database['public']['Tables']['orders']['Row'];
 type OrderItem = Database['public']['Tables']['order_items']['Row'];
@@ -205,24 +204,6 @@ export default function Orders() {
 
   const editingTotal = editingItems.reduce((sum, item) => sum + Number(item.item_total), 0);
   const currentItems = isEditing ? editingItems : selectedOrder?.order_items ?? [];
-
-  const [pushingPos, setPushingPos] = useState(false);
-  const [pushResult, setPushResult] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-
-  const handlePushToPos = async () => {
-    if (!selectedOrder) return;
-    setPushingPos(true);
-    setPushResult(null);
-    try {
-      const result = await pushOrderToUltimatePos(selectedOrder.id);
-      setPushResult({ type: 'success', message: result.message || 'Pushed to UltimatePOS' });
-    } catch (e: any) {
-      setPushResult({ type: 'error', message: e.message || 'Push failed' });
-    } finally {
-      setPushingPos(false);
-      setTimeout(() => setPushResult(null), 5000);
-    }
-  };
 
   return (
     <div className="p-4 sm:p-6 lg:p-8">
@@ -536,18 +517,6 @@ export default function Orders() {
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Delete order
                     </button>
-                    <button
-                      onClick={handlePushToPos}
-                      disabled={pushingPos}
-                      className="mt-1 inline-flex w-full items-center justify-center gap-2 rounded-full border border-ocean-200 bg-white py-2.5 text-xs font-semibold text-ocean-700 transition hover:bg-ocean-50 disabled:opacity-50"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${pushingPos ? 'animate-spin' : ''}`} /> {pushingPos ? 'Pushing...' : 'Re-push to UltimatePOS'}
-                    </button>
-                    {pushResult && (
-                      <p className={`mt-1 text-xs ${pushResult.type === 'success' ? 'text-emerald-600' : 'text-rose-600'}`}>
-                        {pushResult.message}
-                      </p>
-                    )}
                   </div>
                 )}
               </div>

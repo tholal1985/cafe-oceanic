@@ -9,7 +9,6 @@ import { useStore } from '../store/useStore';
 import { sendOrderConfirmation } from '../lib/messagingService';
 import { PaymentService } from '../lib/paymentService';
 import { useCurrency } from '../hooks/useCurrency';
-import { pushOrderToUltimatePos } from '../lib/ultimateposService';
 
 export default function PaymentScreen() {
   const navigate = useNavigate();
@@ -128,8 +127,6 @@ export default function PaymentScreen() {
             console.error('Error sending order confirmation:', error);
           }
         }
-
-        pushOrderToUltimatePos(order.id).catch((err) => console.error('UltimatePOS push failed:', err));
 
         setTimeout(() => {
           clearCart();
