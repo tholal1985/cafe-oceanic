@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertTriangle, ArrowRight, ChefHat, Check, Clock, CreditCard as Edit2, Home, Minus,
-  Package, Phone, Plus, Search, ShoppingBag, Trash2, X,
+  Package, Phone, Plus, Search, ShoppingBag, Trash2, X, Link2, Loader2,
 } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 import type { Database } from '../../lib/database.types';
@@ -52,10 +52,13 @@ export default function Orders() {
   const [deleteError, setDeleteError] = useState('');
   const [filter, setFilter] = useState<typeof FILTERS[number]['value']>('all');
   const [search, setSearch] = useState('');
+  const [uposLogs, setUposLogs] = useState<Record<string, { status: string; ultimatepos_sale_id: number | null; error_message: string | null }>>({});
+  const [pushingOrderId, setPushingOrderId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchOrders();
     fetchProducts();
+    fetchUposLogs();
     const subscription = supabase
       .channel('orders')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'orders' }, () => { fetchOrders(); })
@@ -75,6 +78,48 @@ export default function Orders() {
     const { data } = await supabase
       .from('products').select('*').eq('is_available', true).order('name');
     if (data) setProducts(data);
+  };
+
+  const fetchUposLogs = async () => {
+    const { data } = await supabase
+      .from('ultimatepos_order_log')
+      .select('order_id, status, ultimatepos_sale_id, error_message')
+      .order('created_at', { ascending: false });
+    if (data) {
+      const map: Record<string, { status: string; ultimatepos_sale_id: number | null; error_message: string | null }> = {};
+      for (const log of data) {
+        if (!map[log.order_id]) map[log.order_id] = log as any;
+      }
+      setUposLogs(map);
+    }
+  };
+
+  const pushOrderToUpos = async (orderId: string) => {
+    setPushingOrderId(orderId);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+      const resp = await fetch(
+        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ultimatepos-sync`,
+        {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ action: 'push_order', orderId }),
+        },
+      );
+      const result = await resp.json();
+      if (!result.success) {
+        alert(result.error || 'Failed to push order to UltimatePOS');
+      }
+      fetchUposLogs();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Push failed');
+    } finally {
+      setPushingOrderId(null);
+    }
   };
 
   const startEditing = () => {
@@ -312,6 +357,19 @@ export default function Orders() {
                     <span>{itemCount} item{itemCount === 1 ? '' : 's'}</span>
                     <span className="text-ink-200">·</span>
                     <span className="capitalize">{order.payment_method || 'n/a'}</span>
+                    {uposLogs[order.id] && (
+                      <>
+                        <span className="text-ink-200">·</span>
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium ${
+                          uposLogs[order.id].status === 'success' ? 'text-emerald-600'
+                          : uposLogs[order.id].status === 'failed' ? 'text-rose-600'
+                          : 'text-amber-600'
+                        }`}>
+                          <Link2 size={12} />
+                          {uposLogs[order.id].status === 'success' ? `UPoS #${uposLogs[order.id].ultimatepos_sale_id}` : uposLogs[order.id].status}
+                        </span>
+                      </>
+                    )}
                   </div>
 
                   {action && order.status !== 'completed' && order.status !== 'cancelled' && (
@@ -517,6 +575,16 @@ export default function Orders() {
                     >
                       <Trash2 className="h-3.5 w-3.5" /> Delete order
                     </button>
+                    {selectedOrder.status === 'completed' && (
+                      <button
+                        onClick={() => pushOrderToUpos(selectedOrder.id)}
+                        disabled={pushingOrderId === selectedOrder.id}
+                        className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-full border border-ocean-200 bg-ocean-50 py-2.5 text-xs font-semibold text-ocean-800 transition hover:bg-ocean-100 disabled:opacity-50"
+                      >
+                        {pushingOrderId === selectedOrder.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Link2 className="h-3.5 w-3.5" />}
+                        {pushingOrderId === selectedOrder.id ? 'Pushing...' : 'Push to UltimatePOS'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Plus, CreditCard as Edit2, Trash2, X, Package, Download, Upload, AlertCircle, CheckCircle, Clock, FileDown, RefreshCw } from 'lucide-react';
+import { Plus, CreditCard as Edit2, Trash2, X, Package, Download, Upload, AlertCircle, CheckCircle, Clock, FileDown, RefreshCw, Link2 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
 import type { Database } from '../../lib/database.types';
@@ -488,13 +488,23 @@ export default function Products() {
           <p className="text-gray-600">Manage menu products and product packs</p>
         </div>
         {activeTab === 'products' && (
-          <button
-            onClick={() => setShowModal(true)}
-            className="flex items-center gap-2 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors"
-          >
-            <Plus size={20} />
-            Add Product
-          </button>
+          <div className="flex gap-3">
+            <a
+              href="/admin/ultimatepos"
+              className="flex items-center gap-2 px-4 py-3 bg-ocean-700 text-white rounded-lg hover:bg-ocean-800 transition-colors"
+              title="Sync products from UltimatePOS"
+            >
+              <Link2 size={20} />
+              Sync from UltimatePOS
+            </a>
+            <button
+              onClick={() => setShowModal(true)}
+              className="flex items-center gap-2 bg-red-600 text-white px-6 py-3 rounded-lg hover:bg-red-700 transition-colors"
+            >
+              <Plus size={20} />
+              Add Product
+            </button>
+          </div>
         )}
         {activeTab === 'packs' && (
           <div className="flex gap-3">
