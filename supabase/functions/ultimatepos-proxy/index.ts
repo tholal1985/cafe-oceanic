@@ -30,14 +30,46 @@ interface TokenCache {
 
 let tokenCache: TokenCache | null = null;
 
-// Cloudflare blocks requests without a browser-like User-Agent, returning a
-// 403 "Just a moment..." JS challenge page instead of the real API response.
-// These headers make our server-side fetch look like a normal HTTP client.
+// Cloudflare's "managed challenge" blocks non-browser traffic with a 403
+// and a "Just a moment..." JS challenge page. We send a realistic browser
+// fingerprint to get past lower security levels. If the site owner has set
+// Cloudflare to "managed challenge" on all traffic, only they can fix this
+// by creating a WAF skip-rule for API paths (e.g. /oauth/token, /connector/api/*).
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+
 const UPOS_HEADERS: Record<string, string> = {
-  "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
-  "Accept": "application/json",
+  "User-Agent": BROWSER_UA,
+  "Accept": "application/json, text/plain, */*",
   "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+  "Cache-Control": "no-cache",
+  "Pragma": "no-cache",
+  "Sec-Ch-Ua": '"Chromium";v="131", "Not_A Brand";v="24", "Google Chrome";v="131"',
+  "Sec-Ch-Ua-Mobile": "?0",
+  "Sec-Ch-Ua-Platform": '"Windows"',
+  "Sec-Fetch-Dest": "empty",
+  "Sec-Fetch-Mode": "cors",
+  "Sec-Fetch-Site": "same-origin",
 };
+
+function isCloudflareChallenge(status: number, body: string): boolean {
+  return status === 403 && body.includes("Just a moment...");
+}
+
+function cloudflareError(baseUrl: string): string {
+  return (
+    `Cloudflare bot protection on ${baseUrl} is blocking this request. ` +
+    `The site owner must do ONE of the following in the Cloudflare dashboard:\n` +
+    `1. Go to Security > WAF > Custom Rules and create a "Skip" rule for ` +
+    `URI Path matching "/oauth/token" and "/connector/api/*".\n` +
+    `2. Or go to Security > Bots and turn off "Bot Fight Mode".\n` +
+    `3. Or switch the Security Level from "Managed Challenge" to "Essentially Off" ` +
+    `for API endpoints.\n` +
+    `Alternatively, switch to the "Personal Access Token" auth method in the ` +
+    `UltimatePOS integration settings — it skips the /oauth/token endpoint entirely.`
+  );
+}
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
@@ -65,6 +97,7 @@ async function getBearerToken(config: UltimatePOSConfig): Promise<string> {
     });
     if (!resp.ok) {
       const t = await resp.text();
+      if (isCloudflareChallenge(resp.status, t)) throw new Error(cloudflareError(baseUrl));
       throw new Error(`Password grant failed (${baseUrl}/oauth/token): ${resp.status} — ${t}`);
     }
     const data = await resp.json();
@@ -94,6 +127,7 @@ async function getBearerToken(config: UltimatePOSConfig): Promise<string> {
   }
   if (!resp.ok) {
     const t = await resp.text();
+    if (isCloudflareChallenge(resp.status, t)) throw new Error(cloudflareError(baseUrl));
     throw new Error(`Client credentials grant failed: ${resp.status} — ${t}`);
   }
   const data = await resp.json();
@@ -116,9 +150,12 @@ async function uposRequest(
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await resp.text();
+  if (!resp.ok) {
+    if (isCloudflareChallenge(resp.status, text)) throw new Error(cloudflareError(config.base_url));
+    throw new Error(`UltimatePOS ${method} ${path} failed ${resp.status}: ${text}`);
+  }
   let json: unknown;
   try { json = JSON.parse(text); } catch { json = { raw: text }; }
-  if (!resp.ok) throw new Error(`UltimatePOS ${method} ${path} failed ${resp.status}: ${text}`);
   return json;
 }
 
@@ -132,6 +169,7 @@ async function verifyToken(config: UltimatePOSConfig, token: string): Promise<vo
     if (r.status !== 404) {
       if (!r.ok) {
         const t = await r.text();
+        if (isCloudflareChallenge(r.status, t)) throw new Error(cloudflareError(baseUrl));
         throw new Error(`API access denied (${baseUrl}${path}): ${r.status} — ${t}`);
       }
       return;
