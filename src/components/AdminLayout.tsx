@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
   Settings, Lock, Key, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet, RefreshCw
+  ExternalLink, Search, Layers, ShieldCheck, Wallet, Link2
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -51,8 +51,8 @@ const NAV_GROUPS = [
     label: 'System',
     items: [
       { path: '/admin/messaging', icon: MessageCircle, label: 'Messaging' },
+      { path: '/admin/ultimatepos', icon: Link2, label: 'UltimatePOS', adminOnly: true },
       { path: '/admin/api-keys', icon: Key, label: 'API Keys' },
-      { path: '/admin/ultimatepos', icon: RefreshCw, label: 'UltimatePOS' },
       { path: '/admin/settings', icon: Settings, label: 'Settings', requireSettingsEdit: true },
       { path: '/admin/backup', icon: Database, label: 'Backup & Restore', adminOnly: true },
     ],

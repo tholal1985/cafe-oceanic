@@ -1,3 +1,0 @@
-[functions.ultimatepos-sync]
-verify_jwt = true
-entrypoint = "./functions/ultimatepos-sync/index.ts"

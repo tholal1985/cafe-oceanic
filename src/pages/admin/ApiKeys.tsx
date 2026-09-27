@@ -1,9 +1,5 @@
 import { useState, useEffect } from 'react';
-import {
-  Key, Plus, Trash2, Copy, Eye, EyeOff, AlertCircle, CheckCircle,
-  ShoppingBag, QrCode as QrCodeIcon, ShieldOff, ShieldCheck,
-} from 'lucide-react';
-import { QRCodeSVG } from 'qrcode.react';
+import { Key, Plus, Trash2, Copy, Eye, EyeOff, AlertCircle, CheckCircle } from 'lucide-react';
 import { supabase } from '../../lib/supabase';
 
 interface ApiKey {
@@ -23,75 +19,21 @@ interface ApiKey {
   created_at: string;
 }
 
-interface WooKey {
-  id: string;
-  description: string;
-  wp_user: string;
-  permissions: 'read' | 'write' | 'read_write';
-  consumer_key: string;
-  consumer_key_prefix: string;
-  is_active: boolean;
-  last_used_at: string | null;
-  created_at: string;
-}
-
-type WooPermission = 'read' | 'write' | 'read_write';
-
-const PERMISSION_LABELS: Record<WooPermission, string> = {
-  read: 'Read',
-  write: 'Write',
-  read_write: 'Read/Write',
-};
-
-const PERMISSION_DESCRIPTIONS: Record<WooPermission, string> = {
-  read: 'View orders, products, customers — no changes',
-  write: 'Create and update data — no viewing',
-  read_write: 'Full access to view, create, and update',
-};
-
-function randomHex(length: number): string {
-  const chars = '0123456789abcdef';
-  let out = '';
-  const arr = new Uint32Array(length);
-  crypto.getRandomValues(arr);
-  for (let i = 0; i < length; i++) out += chars[arr[i] % chars.length];
-  return out;
-}
-
-async function hashSecret(secret: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(secret);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-}
-
 export default function ApiKeys() {
   const [apiKeys, setApiKeys] = useState<ApiKey[]>([]);
-  const [wooKeys, setWooKeys] = useState<WooKey[]>([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [newApiKey, setNewApiKey] = useState<string | null>(null);
   const [showKey, setShowKey] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
-  const [formData, setFormData] = useState({ name: '', rate_limit: 1000, expires_at: '' });
-
-  const [showWooModal, setShowWooModal] = useState(false);
-  const [wooForm, setWooForm] = useState({
-    description: '',
-    wp_user: '',
-    permissions: 'read' as WooPermission,
-  store_url: '',
+  const [copied, setCopied] = useState(false);
+  const [formData, setFormData] = useState({
+    name: '',
+    rate_limit: 1000,
+    expires_at: '',
   });
-  const [newWooKey, setNewWooKey] = useState<{
-    consumer_key: string;
-    consumer_secret: string;
-    store_url: string;
-  } | null>(null);
 
   useEffect(() => {
     fetchApiKeys();
-    fetchWooKeys();
   }, []);
 
   const fetchApiKeys = async () => {
@@ -100,25 +42,13 @@ export default function ApiKeys() {
         .from('api_keys')
         .select('*')
         .order('created_at', { ascending: false });
+
       if (error) throw error;
       setApiKeys(data || []);
     } catch (error) {
       console.error('Error fetching API keys:', error);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchWooKeys = async () => {
-    try {
-      const { data, error } = await supabase
-        .from('woocommerce_api_keys')
-        .select('*')
-        .order('created_at', { ascending: false });
-      if (error) throw error;
-      setWooKeys((data as WooKey[]) || []);
-    } catch (error) {
-      console.error('Error fetching WooCommerce keys:', error);
     }
   };
 
@@ -131,10 +61,17 @@ export default function ApiKeys() {
     return key;
   };
 
-  const hashKey = async (key: string) => hashSecret(key);
+  const hashKey = async (key: string) => {
+    const encoder = new TextEncoder();
+    const data = encoder.encode(key);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  };
 
   const handleCreateApiKey = async (e: React.FormEvent) => {
     e.preventDefault();
+
     try {
       const apiKey = generateApiKey();
       const keyHash = await hashKey(apiKey);
@@ -163,7 +100,10 @@ export default function ApiKeys() {
   };
 
   const handleDeleteApiKey = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) return;
+    if (!confirm('Are you sure you want to delete this API key? This action cannot be undone.')) {
+      return;
+    }
+
     try {
       const { error } = await supabase.from('api_keys').delete().eq('id', id);
       if (error) throw error;
@@ -176,7 +116,11 @@ export default function ApiKeys() {
 
   const handleToggleActive = async (id: string, isActive: boolean) => {
     try {
-      const { error } = await supabase.from('api_keys').update({ is_active: !isActive }).eq('id', id);
+      const { error } = await supabase
+        .from('api_keys')
+        .update({ is_active: !isActive })
+        .eq('id', id);
+
       if (error) throw error;
       fetchApiKeys();
     } catch (error) {
@@ -185,10 +129,10 @@ export default function ApiKeys() {
     }
   };
 
-  const copyToClipboard = (text: string, label: string) => {
+  const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    setCopied(label);
-    setTimeout(() => setCopied(null), 2000);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   const handleCloseModal = () => {
@@ -196,70 +140,6 @@ export default function ApiKeys() {
     setNewApiKey(null);
     setShowKey(false);
     setFormData({ name: '', rate_limit: 1000, expires_at: '' });
-  };
-
-  const handleCreateWooKey = async (e: React.FormEvent) => {
-    e.preventDefault();
-    try {
-      const consumerKey = `ck_${randomHex(32)}`;
-      const consumerSecret = `cs_${randomHex(48)}`;
-      const secretHash = await hashSecret(consumerSecret);
-      const keyPrefix = consumerKey.substring(0, 12);
-
-      const { data: user } = await supabase.auth.getUser();
-
-      const { error } = await supabase.from('woocommerce_api_keys').insert({
-        description: wooForm.description,
-        wp_user: wooForm.wp_user,
-        permissions: wooForm.permissions,
-        consumer_key: consumerKey,
-        consumer_secret_hash: secretHash,
-        consumer_key_prefix: keyPrefix,
-        created_by: user.user?.id,
-      });
-
-      if (error) throw error;
-
-      setNewWooKey({
-        consumer_key: consumerKey,
-        consumer_secret: consumerSecret,
-        store_url: wooForm.store_url,
-      });
-      setWooForm({ description: '', wp_user: '', permissions: 'read', store_url: '' });
-      fetchWooKeys();
-    } catch (error) {
-      console.error('Error creating WooCommerce key:', error);
-      alert('Failed to create WooCommerce API key');
-    }
-  };
-
-  const handleDeleteWooKey = async (id: string) => {
-    if (!confirm('Revoke this WooCommerce key? Any integration using it will stop working immediately.')) return;
-    try {
-      const { error } = await supabase.from('woocommerce_api_keys').delete().eq('id', id);
-      if (error) throw error;
-      fetchWooKeys();
-    } catch (error) {
-      console.error('Error deleting WooCommerce key:', error);
-      alert('Failed to revoke WooCommerce key');
-    }
-  };
-
-  const handleToggleWooActive = async (id: string, isActive: boolean) => {
-    try {
-      const { error } = await supabase.from('woocommerce_api_keys').update({ is_active: !isActive }).eq('id', id);
-      if (error) throw error;
-      fetchWooKeys();
-    } catch (error) {
-      console.error('Error updating WooCommerce key:', error);
-      alert('Failed to update WooCommerce key');
-    }
-  };
-
-  const handleCloseWooModal = () => {
-    setShowWooModal(false);
-    setNewWooKey(null);
-    setWooForm({ description: '', wp_user: '', permissions: 'read', store_url: '' });
   };
 
   if (loading) {
@@ -277,107 +157,11 @@ export default function ApiKeys() {
           <Key size={32} className="text-indigo-600" />
           <h1 className="text-3xl font-bold text-gray-800">API Keys</h1>
         </div>
-      </div>
-
-      {/* WooCommerce REST API section */}
-      <div className="mb-10">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-2">
-            <ShoppingBag size={20} className="text-indigo-600" />
-            <h2 className="text-xl font-semibold text-gray-800">WooCommerce REST API</h2>
-          </div>
-          <button
-            onClick={() => setShowWooModal(true)}
-            className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors"
-          >
-            <Plus size={18} />
-            Generate API Key
-          </button>
-        </div>
-
-        <p className="text-sm text-gray-500 mb-4 max-w-2xl">
-          Create keys to connect your WooCommerce store. Choose a user, set permissions, and we'll
-          generate a consumer key and secret plus a QR code you can scan to configure a client.
-        </p>
-
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="w-full">
-            <thead className="bg-gray-50 border-b border-gray-200">
-              <tr>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">User</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Permissions</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Consumer Key</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Used</th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {wooKeys.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-gray-500">
-                    No WooCommerce API keys generated yet
-                  </td>
-                </tr>
-              ) : (
-                wooKeys.map((key) => (
-                  <tr key={key.id}>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="text-sm font-medium text-gray-900">{key.description}</div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{key.wp_user}</td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <span className={`px-2.5 py-1 rounded-full text-xs font-medium ${
-                        key.permissions === 'read_write'
-                          ? 'bg-amber-100 text-amber-800'
-                          : key.permissions === 'write'
-                            ? 'bg-blue-100 text-blue-800'
-                            : 'bg-green-100 text-green-800'
-                      }`}>
-                        {PERMISSION_LABELS[key.permissions]}
-                      </span>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <code className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">{key.consumer_key_prefix}…</code>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <button
-                        onClick={() => handleToggleWooActive(key.id, key.is_active)}
-                        className={`px-3 py-1 rounded-full text-xs font-medium ${
-                          key.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
-                        }`}
-                      >
-                        {key.is_active ? 'Active' : 'Inactive'}
-                      </button>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                      {key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never'}
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm">
-                      <button onClick={() => handleDeleteWooKey(key.id)} className="text-red-600 hover:text-red-800">
-                        <Trash2 size={18} />
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Internal REST API keys */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Key size={20} className="text-gray-700" />
-          <h2 className="text-xl font-semibold text-gray-800">Internal REST API Keys</h2>
-        </div>
         <button
           onClick={() => setShowModal(true)}
-          className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-lg hover:bg-indigo-700 transition-colors"
+          className="flex items-center gap-2 bg-indigo-600 text-white px-6 py-3 rounded-lg hover:bg-indigo-700 transition-colors"
         >
-          <Plus size={18} />
+          <Plus size={20} />
           Create API Key
         </button>
       </div>
@@ -386,12 +170,24 @@ export default function ApiKeys() {
         <table className="w-full">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Key Prefix</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Rate Limit</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Used</th>
-              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Name
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Key Prefix
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Rate Limit
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Status
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Last Used
+              </th>
+              <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Actions
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
@@ -408,24 +204,35 @@ export default function ApiKeys() {
                     <div className="text-sm font-medium text-gray-900">{key.name}</div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap">
-                    <code className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">{key.key_prefix}...</code>
+                    <code className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">
+                      {key.key_prefix}...
+                    </code>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{key.rate_limit}/hour</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                    {key.rate_limit}/hour
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap">
                     <button
                       onClick={() => handleToggleActive(key.id, key.is_active)}
                       className={`px-3 py-1 rounded-full text-xs font-medium ${
-                        key.is_active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                        key.is_active
+                          ? 'bg-green-100 text-green-800'
+                          : 'bg-gray-100 text-gray-800'
                       }`}
                     >
                       {key.is_active ? 'Active' : 'Inactive'}
                     </button>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    {key.last_used_at ? new Date(key.last_used_at).toLocaleString() : 'Never'}
+                    {key.last_used_at
+                      ? new Date(key.last_used_at).toLocaleString()
+                      : 'Never'}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
-                    <button onClick={() => handleDeleteApiKey(key.id)} className="text-red-600 hover:text-red-800">
+                    <button
+                      onClick={() => handleDeleteApiKey(key.id)}
+                      className="text-red-600 hover:text-red-800"
+                    >
                       <Trash2 size={18} />
                     </button>
                   </td>
@@ -436,7 +243,6 @@ export default function ApiKeys() {
         </table>
       </div>
 
-      {/* Internal API key modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-white rounded-xl p-8 max-w-md w-full mx-4">
@@ -446,6 +252,7 @@ export default function ApiKeys() {
                   <CheckCircle size={24} />
                   <h2 className="text-2xl font-bold">API Key Created</h2>
                 </div>
+
                 <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
                   <div className="flex items-start gap-2">
                     <AlertCircle size={20} className="text-yellow-600 mt-0.5 flex-shrink-0" />
@@ -454,8 +261,11 @@ export default function ApiKeys() {
                     </p>
                   </div>
                 </div>
+
                 <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Your API Key</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    Your API Key
+                  </label>
                   <div className="flex gap-2">
                     <input
                       type={showKey ? 'text' : 'password'}
@@ -463,28 +273,38 @@ export default function ApiKeys() {
                       readOnly
                       className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm"
                     />
-                    <button onClick={() => setShowKey(!showKey)} className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                    <button
+                      onClick={() => setShowKey(!showKey)}
+                      className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50"
+                    >
                       {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
                     </button>
                     <button
-                      onClick={() => copyToClipboard(newApiKey, 'internal')}
+                      onClick={() => copyToClipboard(newApiKey)}
                       className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
                     >
                       <Copy size={20} />
-                      {copied === 'internal' ? 'Copied!' : 'Copy'}
+                      {copied ? 'Copied!' : 'Copy'}
                     </button>
                   </div>
                 </div>
-                <button onClick={handleCloseModal} className="w-full px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
+
+                <button
+                  onClick={handleCloseModal}
+                  className="w-full px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700"
+                >
                   Close
                 </button>
               </div>
             ) : (
               <form onSubmit={handleCreateApiKey}>
                 <h2 className="text-2xl font-bold mb-6">Create API Key</h2>
+
                 <div className="space-y-4 mb-6">
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Name</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Name
+                    </label>
                     <input
                       type="text"
                       value={formData.name}
@@ -494,209 +314,52 @@ export default function ApiKeys() {
                       required
                     />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Rate Limit (requests/hour)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Rate Limit (requests/hour)
+                    </label>
                     <input
                       type="number"
                       value={formData.rate_limit}
-                      onChange={(e) => setFormData({ ...formData, rate_limit: parseInt(e.target.value) })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, rate_limit: parseInt(e.target.value) })
+                      }
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                       min="1"
                       max="10000"
                       required
                     />
                   </div>
+
                   <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Expires At (optional)</label>
+                    <label className="block text-sm font-medium text-gray-700 mb-2">
+                      Expires At (optional)
+                    </label>
                     <input
                       type="datetime-local"
                       value={formData.expires_at}
-                      onChange={(e) => setFormData({ ...formData, expires_at: e.target.value })}
+                      onChange={(e) =>
+                        setFormData({ ...formData, expires_at: e.target.value })
+                      }
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                     />
                   </div>
                 </div>
+
                 <div className="flex gap-3">
-                  <button type="button" onClick={handleCloseModal} className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">
+                  <button
+                    type="button"
+                    onClick={handleCloseModal}
+                    className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50"
+                  >
                     Cancel
                   </button>
-                  <button type="submit" className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
+                  <button
+                    type="submit"
+                    className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700"
+                  >
                     Create Key
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* WooCommerce key modal */}
-      {showWooModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-xl p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto">
-            {newWooKey ? (
-              <div>
-                <div className="flex items-center gap-2 text-green-600 mb-4">
-                  <CheckCircle size={24} />
-                  <h2 className="text-2xl font-bold">WooCommerce API Key Generated</h2>
-                </div>
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-4 mb-6">
-                  <div className="flex items-start gap-2">
-                    <AlertCircle size={20} className="text-yellow-600 mt-0.5 flex-shrink-0" />
-                    <p className="text-sm text-yellow-800">
-                      Copy your consumer key and secret now. The secret will not be shown again.
-                    </p>
-                  </div>
-                </div>
-
-                {/* QR code */}
-                <div className="flex flex-col items-center mb-6">
-                  <div className="bg-white p-4 rounded-xl border border-gray-200">
-                    <QRCodeSVG
-                      value={JSON.stringify({
-                        consumer_key: newWooKey.consumer_key,
-                        consumer_secret: newWooKey.consumer_secret,
-                        store_url: newWooKey.store_url,
-                      })}
-                      size={180}
-                      level="M"
-                      includeMargin
-                    />
-                  </div>
-                  <p className="mt-2 flex items-center gap-1.5 text-xs text-gray-500">
-                    <QrCodeIcon size={14} />
-                    Scan with your WooCommerce client to configure the connection
-                  </p>
-                </div>
-
-                {/* Consumer key */}
-                <div className="mb-4">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Consumer Key</label>
-                  <div className="flex gap-2">
-                    <input
-                      type="text"
-                      value={newWooKey.consumer_key}
-                      readOnly
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm"
-                    />
-                    <button
-                      onClick={() => copyToClipboard(newWooKey.consumer_key, 'ck')}
-                      className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-                    >
-                      <Copy size={20} />
-                      {copied === 'ck' ? 'Copied!' : 'Copy'}
-                    </button>
-                  </div>
-                </div>
-
-                {/* Consumer secret */}
-                <div className="mb-6">
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Consumer Secret</label>
-                  <div className="flex gap-2">
-                    <input
-                      type={showKey ? 'text' : 'password'}
-                      value={newWooKey.consumer_secret}
-                      readOnly
-                      className="flex-1 px-4 py-2 border border-gray-300 rounded-lg bg-gray-50 font-mono text-sm"
-                    />
-                    <button onClick={() => setShowKey(!showKey)} className="px-3 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
-                      {showKey ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </button>
-                    <button
-                      onClick={() => copyToClipboard(newWooKey.consumer_secret, 'cs')}
-                      className="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 flex items-center gap-2"
-                    >
-                      <Copy size={20} />
-                      {copied === 'cs' ? 'Copied!' : 'Copy'}
-                    </button>
-                  </div>
-                </div>
-
-                <button onClick={handleCloseWooModal} className="w-full px-6 py-3 bg-gray-600 text-white rounded-lg hover:bg-gray-700">
-                  Done
-                </button>
-              </div>
-            ) : (
-              <form onSubmit={handleCreateWooKey}>
-                <div className="flex items-center gap-2 mb-6">
-                  <ShoppingBag size={24} className="text-indigo-600" />
-                  <h2 className="text-2xl font-bold">Generate WooCommerce API Key</h2>
-                </div>
-
-                <div className="space-y-4 mb-6">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Description</label>
-                    <input
-                      type="text"
-                      value={wooForm.description}
-                      onChange={(e) => setWooForm({ ...wooForm, description: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="e.g. Mobile app integration"
-                      required
-                    />
-                    <p className="mt-1 text-xs text-gray-500">A label so you remember what this key is for.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">User</label>
-                    <input
-                      type="text"
-                      value={wooForm.wp_user}
-                      onChange={(e) => setWooForm({ ...wooForm, wp_user: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="WordPress username"
-                      required
-                    />
-                    <p className="mt-1 text-xs text-gray-500">The WooCommerce user this key will act on behalf of.</p>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Permissions</label>
-                    <div className="space-y-2">
-                      {(['read', 'write', 'read_write'] as WooPermission[]).map((perm) => {
-                        const active = wooForm.permissions === perm;
-                        const Icon = perm === 'read_write' ? ShieldOff : ShieldCheck;
-                        return (
-                          <button
-                            key={perm}
-                            type="button"
-                            onClick={() => setWooForm({ ...wooForm, permissions: perm })}
-                            className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg border transition text-left ${
-                              active
-                                ? 'border-indigo-500 bg-indigo-50 ring-2 ring-indigo-200'
-                                : 'border-gray-300 hover:bg-gray-50'
-                            }`}
-                          >
-                            <Icon size={18} className={active ? 'text-indigo-600' : 'text-gray-400'} />
-                            <div>
-                              <div className="text-sm font-medium text-gray-900">{PERMISSION_LABELS[perm]}</div>
-                              <div className="text-xs text-gray-500">{PERMISSION_DESCRIPTIONS[perm]}</div>
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-2">Store URL (optional)</label>
-                    <input
-                      type="url"
-                      value={wooForm.store_url}
-                      onChange={(e) => setWooForm({ ...wooForm, store_url: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                      placeholder="https://yourstore.com"
-                    />
-                    <p className="mt-1 text-xs text-gray-500">Embedded in the QR code so clients know where to connect.</p>
-                  </div>
-                </div>
-
-                <div className="flex gap-3">
-                  <button type="button" onClick={handleCloseWooModal} className="flex-1 px-6 py-3 border border-gray-300 rounded-lg hover:bg-gray-50">
-                    Cancel
-                  </button>
-                  <button type="submit" className="flex-1 px-6 py-3 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700">
-                    Generate Key
                   </button>
                 </div>
               </form>
