@@ -54,42 +54,113 @@ async function getConfig(supabase: any): Promise<UltimatePosConfig | null> {
 }
 
 // ============================================================
+// URL normalization
+// UltimatePOS can be installed at various paths:
+//   https://example.com/  (if /public was removed)
+//   https://example.com/public/
+//   https://example.com/pos/public/
+// We try the URL as-is first, then with /public appended.
+// ============================================================
+function normalizeBaseUrl(rawUrl: string): string {
+  return rawUrl.replace(/\/+$/, "");
+}
+
+function getCandidateBaseUrls(rawUrl: string): string[] {
+  const base = normalizeBaseUrl(rawUrl);
+  const candidates: string[] = [base];
+  if (!base.endsWith("/public")) {
+    candidates.push(`${base}/public`);
+  }
+  return candidates;
+}
+
+// ============================================================
+// Response checking
+// ============================================================
+function isHtmlResponse(text: string): boolean {
+  const lower = text.trimStart().toLowerCase();
+  return lower.startsWith("<!doctype") || lower.startsWith("<html") || lower.startsWith("<head");
+}
+
+function checkApiResponse(resp: Response, text: string, context: string): void {
+  if (isHtmlResponse(text)) {
+    throw new Error(
+      `${context}: UltimatePOS returned an HTML page instead of a JSON API response. ` +
+      `This usually means: (1) the API URL is wrong — try adding /public to your URL (e.g. https://yoursite.com/public), ` +
+      `(2) the API Connector module is not installed/enabled in UltimatePOS, or ` +
+      `(3) Cloudflare or a firewall is blocking the API request. ` +
+      `Response started with: ${text.substring(0, 100)}`
+    );
+  }
+  if (!resp.ok) {
+    throw new Error(
+      `${context}: UltimatePOS returned HTTP ${resp.status}. Response: ${text.substring(0, 300)}`
+    );
+  }
+}
+
+// ============================================================
 // Authentication
 // ============================================================
-async function getAuthToken(config: UltimatePosConfig): Promise<string> {
+async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string; baseUrl: string }> {
   if (config.auth_mode === "pat" && config.personal_access_token) {
-    return config.personal_access_token;
+    return { token: config.personal_access_token, baseUrl: normalizeBaseUrl(config.api_url || "") };
   }
 
-  // OAuth password grant
-  const baseUrl = (config.api_url || "").replace(/\/$/, "");
-  const tokenUrl = `${baseUrl}/oauth/token`;
+  // OAuth password grant — try candidate URLs
+  const candidates = getCandidateBaseUrls(config.api_url || "");
+  const errors: string[] = [];
 
-  const body = new URLSearchParams({
-    grant_type: "password",
-    client_id: config.client_id || "",
-    client_secret: config.client_secret || "",
-    username: config.username || "",
-    password: config.password || "",
-    scope: "pos",
-  });
+  for (const baseUrl of candidates) {
+    const tokenUrl = `${baseUrl}/oauth/token`;
+    try {
+      const body = new URLSearchParams({
+        grant_type: "password",
+        client_id: config.client_id || "",
+        client_secret: config.client_secret || "",
+        username: config.username || "",
+        password: config.password || "",
+        scope: "pos",
+      });
 
-  const resp = await fetch(tokenUrl, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/x-www-form-urlencoded",
-      "Accept": "application/json",
-    },
-    body: body.toString(),
-  });
+      const resp = await fetch(tokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json",
+        },
+        body: body.toString(),
+      });
 
-  if (!resp.ok) {
-    const text = await resp.text();
-    throw new Error(`OAuth token request failed (${resp.status}): ${text}`);
+      const text = await resp.text();
+
+      if (isHtmlResponse(text)) {
+        errors.push(`${tokenUrl} returned HTML (not a valid API endpoint)`);
+        continue;
+      }
+
+      if (!resp.ok) {
+        errors.push(`${tokenUrl} returned ${resp.status}: ${text.substring(0, 200)}`);
+        continue;
+      }
+
+      const tokenData = JSON.parse(text);
+      if (tokenData.access_token) {
+        return { token: tokenData.access_token, baseUrl };
+      }
+      errors.push(`${tokenUrl} returned no access_token in response`);
+    } catch (err) {
+      errors.push(`${tokenUrl} threw: ${err instanceof Error ? err.message : String(err)}`);
+    }
   }
 
-  const tokenData = await resp.json();
-  return tokenData.access_token;
+  throw new Error(
+    `OAuth authentication failed. Tried ${candidates.length} URL(s):\n${errors.join("\n")}\n\n` +
+    `Common fixes:\n` +
+    `- Make sure your API URL includes /public if UltimatePOS was installed with it (e.g. https://yoursite.com/public)\n` +
+    `- Verify the API Connector module is installed and enabled in UltimatePOS\n` +
+    `- Check that client_id, client_secret, username, and password are all correct`
+  );
 }
 
 function authHeaders(token: string): Record<string, string> {
@@ -98,6 +169,71 @@ function authHeaders(token: string): Record<string, string> {
     "Accept": "application/json",
     "Content-Type": "application/json",
   };
+}
+
+// ============================================================
+// API request helper — tries candidate base URLs
+// ============================================================
+async function apiRequest(
+  config: UltimatePosConfig,
+  path: string,
+  method: string = "GET",
+  body?: any,
+): Promise<{ data: any; baseUrl: string; rawText: string; status: number }> {
+  const { token, baseUrl: authBaseUrl } = await getAuthToken(config);
+
+  // For PAT mode, also try /public fallback if the first attempt returns HTML
+  const candidates = config.auth_mode === "pat"
+    ? getCandidateBaseUrls(config.api_url || "")
+    : [authBaseUrl];
+
+  const errors: string[] = [];
+
+  for (const baseUrl of candidates) {
+    const url = `${baseUrl}${path}`;
+    try {
+      const resp = await fetch(url, {
+        method,
+        headers: authHeaders(token),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await resp.text();
+
+      if (isHtmlResponse(text)) {
+        errors.push(`${url} returned HTML (not a valid API endpoint)`);
+        continue;
+      }
+
+      if (!resp.ok) {
+        // If this is a 404, try next candidate
+        if (resp.status === 404 && candidates.length > 1) {
+          errors.push(`${url} returned 404`);
+          continue;
+        }
+        // Non-404 error — this URL is responding to the API, just an error
+        throw new Error(`UltimatePOS API returned HTTP ${resp.status}: ${text.substring(0, 500)}`);
+      }
+
+      let data: any;
+      try {
+        data = JSON.parse(text);
+      } catch {
+        throw new Error(`UltimatePOS returned non-JSON response: ${text.substring(0, 300)}`);
+      }
+
+      return { data, baseUrl, rawText: text, status: resp.status };
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("UltimatePOS API returned")) {
+        throw err;
+      }
+      errors.push(`${url}: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  throw new Error(
+    `All URL attempts failed for ${path}:\n${errors.join("\n")}\n\n` +
+    `This usually means the API URL needs /public appended, or the API Connector module is not installed.`
+  );
 }
 
 // ============================================================
@@ -152,18 +288,9 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
   const logId = await createSyncLog(supabase, "products", startedAt);
 
   try {
-    const token = await getAuthToken(config);
-    const baseUrl = (config.api_url || "").replace(/\/$/, "");
-    const url = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=100`;
+    const path = `/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=100`;
+    const { data: result } = await apiRequest(config, path);
 
-    const resp = await fetch(url, { method: "GET", headers: authHeaders(token) });
-    if (!resp.ok) {
-      const text = await resp.text();
-      await completeSyncLog(supabase, logId, "failed", { processed: 0, created: 0, updated: 0, skipped: 0 }, `Failed to fetch products: ${text}`, null);
-      return errorResponse(502, "Failed to fetch products from UltimatePOS", text);
-    }
-
-    const result = await resp.json();
     const products: any[] = result.data || result.products || result || [];
     const productArray = Array.isArray(products) ? products : [];
 
@@ -177,7 +304,6 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
       const description = up.description || up.product_description || "";
       const imageUrl = up.image_url || up.image || null;
 
-      // Check if product already exists by ultimatepos_id
       const { data: existing } = await supabase
         .from("products")
         .select("id, name, price, description, image_url")
@@ -231,7 +357,7 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     await completeSyncLog(supabase, logId, "failed", { processed: 0, created: 0, updated: 0, skipped: 0 }, msg, null);
-    return errorResponse(500, "Product sync failed", msg);
+    return errorResponse(502, "Product sync failed", msg);
   }
 }
 
@@ -243,18 +369,9 @@ async function syncCustomers(supabase: any, config: UltimatePosConfig): Promise<
   const logId = await createSyncLog(supabase, "customers", startedAt);
 
   try {
-    const token = await getAuthToken(config);
-    const baseUrl = (config.api_url || "").replace(/\/$/, "");
-    const url = `${baseUrl}/connector/api/contactapi?business_id=${config.business_id}&type=customer&per_page=100`;
+    const path = `/connector/api/contactapi?business_id=${config.business_id}&type=customer&per_page=100`;
+    const { data: result } = await apiRequest(config, path);
 
-    const resp = await fetch(url, { method: "GET", headers: authHeaders(token) });
-    if (!resp.ok) {
-      const text = await resp.text();
-      await completeSyncLog(supabase, logId, "failed", { processed: 0, created: 0, updated: 0, skipped: 0 }, `Failed to fetch customers: ${text}`, null);
-      return errorResponse(502, "Failed to fetch customers from UltimatePOS", text);
-    }
-
-    const result = await resp.json();
     const customers: any[] = result.data || result.contacts || result || [];
     const customerArray = Array.isArray(customers) ? customers : [];
 
@@ -268,7 +385,6 @@ async function syncCustomers(supabase: any, config: UltimatePosConfig): Promise<
       const email = uc.email || null;
       const phone = uc.mobile || uc.phone || uc.contact_number || null;
 
-      // Check if customer exists by ultimatepos_id
       const { data: existing } = await supabase
         .from("customers")
         .select("id, first_name, last_name, email, phone")
@@ -321,7 +437,7 @@ async function syncCustomers(supabase: any, config: UltimatePosConfig): Promise<
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     await completeSyncLog(supabase, logId, "failed", { processed: 0, created: 0, updated: 0, skipped: 0 }, msg, null);
-    return errorResponse(500, "Customer sync failed", msg);
+    return errorResponse(502, "Customer sync failed", msg);
   }
 }
 
@@ -371,31 +487,13 @@ async function pushSale(supabase: any, config: UltimatePosConfig, pushId: string
   const orderId = push.order_id;
   const payload = push.payload || await buildSalePayload(supabase, orderId, config);
 
-  // Store the payload if it was just built
   if (!push.payload) {
     await supabase.from("ultimatepos_sale_pushes").update({ payload }).eq("id", pushId);
   }
 
   try {
-    const token = await getAuthToken(config);
-    const baseUrl = (config.api_url || "").replace(/\/$/, "");
-    const url = `${baseUrl}/connector/api/sell?business_id=${config.business_id}&location_id=${config.location_id}`;
-
-    const resp = await fetch(url, {
-      method: "POST",
-      headers: authHeaders(token),
-      body: JSON.stringify(payload),
-    });
-
-    const responseText = await resp.text();
-    let responseData: any = null;
-    try { responseData = JSON.parse(responseText); } catch { responseData = { raw: responseText }; }
-
-    if (!resp.ok) {
-      const errorMsg = `UltimatePOS returned ${resp.status}: ${responseText.substring(0, 500)}`;
-      await handlePushFailure(supabase, pushId, errorMsg, push.retry_count, push.max_retries, responseData);
-      return { success: false, error: errorMsg };
-    }
+    const path = `/connector/api/sell?business_id=${config.business_id}&location_id=${config.location_id}`;
+    const { data: responseData, baseUrl } = await apiRequest(config, path, "POST", payload);
 
     const saleId = responseData.id ? String(responseData.id) : (responseData.sale_id ? String(responseData.sale_id) : null);
 
@@ -408,7 +506,6 @@ async function pushSale(supabase: any, config: UltimatePosConfig, pushId: string
       next_retry_at: null,
     }).eq("id", pushId);
 
-    // Write sale ID back to order
     if (saleId) {
       await supabase.from("orders").update({ ultimatepos_sale_id: saleId }).eq("id", orderId);
     }
@@ -433,7 +530,6 @@ async function handlePushFailure(
 ): Promise<void> {
   const newRetryCount = retryCount + 1;
   if (newRetryCount < maxRetries) {
-    // Schedule retry — exponential backoff: 1min, 5min, 15min
     const backoffMinutes = Math.pow(5, newRetryCount - 1);
     const nextRetry = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
     await supabase.from("ultimatepos_sale_pushes").update({
@@ -455,7 +551,6 @@ async function handlePushFailure(
 }
 
 async function processPendingSales(supabase: any, config: UltimatePosConfig): Promise<Response> {
-  // Get all pending and retrying pushes (where next_retry_at has passed)
   const { data: pendingPushes, error } = await supabase
     .from("ultimatepos_sale_pushes")
     .select("id, order_id, status, retry_count, max_retries, next_retry_at")
@@ -469,7 +564,6 @@ async function processPendingSales(supabase: any, config: UltimatePosConfig): Pr
   let succeeded = 0, failed = 0, retried = 0;
 
   for (const push of pushes) {
-    // Skip retries that aren't due yet
     if (push.status === "retrying" && push.next_retry_at && new Date(push.next_retry_at) > new Date()) {
       continue;
     }
@@ -484,36 +578,189 @@ async function processPendingSales(supabase: any, config: UltimatePosConfig): Pr
 }
 
 // ============================================================
-// Connection test
+// Connection test — tries multiple URL variants and reports
 // ============================================================
 async function testConnection(config: UltimatePosConfig): Promise<Response> {
+  const diagnostics: any[] = [];
+  const candidates = getCandidateBaseUrls(config.api_url || "");
+
+  let token: string | null = null;
+  let workingBaseUrl: string | null = null;
+
+  // Step 1: Get auth token
   try {
-    const token = await getAuthToken(config);
-    const baseUrl = (config.api_url || "").replace(/\/$/, "");
-    const url = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
-
-    const resp = await fetch(url, { method: "GET", headers: authHeaders(token) });
-    if (!resp.ok) {
-      const text = await resp.text();
-      return errorResponse(502, "Connection test failed", `UltimatePOS returned ${resp.status}: ${text.substring(0, 300)}`);
+    if (config.auth_mode === "pat" && config.personal_access_token) {
+      token = config.personal_access_token;
+      diagnostics.push({ step: "auth", status: "ok", message: "Using Personal Access Token" });
+    } else {
+      const authResult = await getAuthToken(config);
+      token = authResult.token;
+      workingBaseUrl = authResult.baseUrl;
+      diagnostics.push({ step: "auth", status: "ok", message: `OAuth token obtained from ${workingBaseUrl}` });
     }
-
-    const data = await resp.json();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    diagnostics.push({ step: "auth", status: "failed", message: msg });
     const supabase = createClient(supabaseUrl, supabaseKey);
-    await supabase.from("ultimatepos_config").update({
-      last_connected_at: new Date().toISOString(),
-      connection_status: "connected",
-    }).eq("id", config.id);
-
-    return jsonResponse({ success: true, connected: true, business: data });
-  } catch (error) {
-    const msg = error instanceof Error ? error.message : String(error);
-    const supabase = createClient(supabaseUrl, supabaseKey);
-    await supabase.from("ultimatepos_config").update({
-      connection_status: "error",
-    }).eq("id", config.id);
-    return errorResponse(502, "Connection test failed", msg);
+    await supabase.from("ultimatepos_config").update({ connection_status: "error" }).eq("id", config.id);
+    return errorResponse(502, "Authentication failed", JSON.stringify(diagnostics, null, 2));
   }
+
+  // Step 2: Try API call with each candidate URL
+  const urlsToTry = workingBaseUrl ? [workingBaseUrl, ...candidates.filter(c => c !== workingBaseUrl)] : candidates;
+  const apiErrors: string[] = [];
+
+  for (const baseUrl of urlsToTry) {
+    const apiUrl = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
+    try {
+      const resp = await fetch(apiUrl, { method: "GET", headers: authHeaders(token) });
+      const text = await resp.text();
+
+      if (isHtmlResponse(text)) {
+        apiErrors.push(`${baseUrl} → HTML response (not an API endpoint)`);
+        diagnostics.push({ step: `api-test:${baseUrl}`, status: "html", message: "Got HTML page instead of JSON. This URL is wrong or the API Connector module is not installed." });
+        continue;
+      }
+
+      if (!resp.ok) {
+        apiErrors.push(`${baseUrl} → HTTP ${resp.status}: ${text.substring(0, 200)}`);
+        diagnostics.push({ step: `api-test:${baseUrl}`, status: "error", message: `HTTP ${resp.status}: ${text.substring(0, 200)}` });
+        continue;
+      }
+
+      const data = JSON.parse(text);
+      diagnostics.push({ step: `api-test:${baseUrl}`, status: "ok", message: "API responded successfully" });
+
+      const supabase = createClient(supabaseUrl, supabaseKey);
+      await supabase.from("ultimatepos_config").update({
+        last_connected_at: new Date().toISOString(),
+        connection_status: "connected",
+      }).eq("id", config.id);
+
+      return jsonResponse({
+        success: true,
+        connected: true,
+        working_url: baseUrl,
+        business: data,
+        diagnostics,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      apiErrors.push(`${baseUrl} → ${msg}`);
+      diagnostics.push({ step: `api-test:${baseUrl}`, status: "error", message: msg });
+    }
+  }
+
+  // All URLs failed
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  await supabase.from("ultimatepos_config").update({ connection_status: "error" }).eq("id", config.id);
+
+  return errorResponse(502, "Connection test failed", JSON.stringify({
+    diagnostics,
+    summary: "All URL attempts failed. Most common causes:\n" +
+      "1. Wrong API URL — if UltimatePOS was installed with /public, add it to your URL (e.g. https://yoursite.com/public)\n" +
+      "2. API Connector module not installed — go to UltimatePOS admin → Modules → install/enable 'API or Connector'\n" +
+      "3. Cloudflare blocking — if your site uses Cloudflare, the API may need a Personal Access Token (PAT) instead of OAuth\n" +
+      "4. Wrong business_id — make sure the business ID matches your UltimatePOS business",
+    tried_urls: urlsToTry,
+  }, null, 2));
+}
+
+// ============================================================
+// Debug endpoint — returns detailed diagnostic info
+// ============================================================
+async function debugConnection(config: UltimatePosConfig): Promise<Response> {
+  const diag: any = {
+    config: {
+      api_url: config.api_url,
+      auth_mode: config.auth_mode,
+      business_id: config.business_id,
+      location_id: config.location_id,
+      is_active: config.is_active,
+      has_pat: !!config.personal_access_token,
+      has_client_id: !!config.client_id,
+      has_client_secret: !!config.client_secret,
+      has_username: !!config.username,
+      has_password: !!config.password,
+    },
+    candidate_urls: getCandidateBaseUrls(config.api_url || ""),
+    steps: [] as any[],
+  };
+
+  // Test 1: Check if base URL is reachable at all
+  for (const baseUrl of diag.candidate_urls) {
+    try {
+      const resp = await fetch(baseUrl, { method: "GET", redirect: "follow" });
+      const text = await resp.text();
+      diag.steps.push({
+        step: `reachability:${baseUrl}`,
+        status: resp.status,
+        content_type: resp.headers.get("content-type"),
+        is_html: isHtmlResponse(text),
+        body_preview: text.substring(0, 200),
+      });
+    } catch (err) {
+      diag.steps.push({
+        step: `reachability:${baseUrl}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Test 2: Check if /connector/api/business endpoint exists
+  for (const baseUrl of diag.candidate_urls) {
+    const apiUrl = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
+    try {
+      const token = config.auth_mode === "pat" && config.personal_access_token
+        ? config.personal_access_token
+        : null;
+
+      const headers: Record<string, string> = { "Accept": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      const resp = await fetch(apiUrl, { method: "GET", headers });
+      const text = await resp.text();
+      diag.steps.push({
+        step: `api:${apiUrl}`,
+        status: resp.status,
+        is_html: isHtmlResponse(text),
+        body_preview: text.substring(0, 300),
+      });
+    } catch (err) {
+      diag.steps.push({
+        step: `api:${apiUrl}`,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  // Test 3: Check if /oauth/token endpoint exists (for OAuth mode)
+  if (config.auth_mode === "oauth") {
+    for (const baseUrl of diag.candidate_urls) {
+      const tokenUrl = `${baseUrl}/oauth/token`;
+      try {
+        const resp = await fetch(tokenUrl, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          body: "grant_type=password&test=1",
+        });
+        const text = await resp.text();
+        diag.steps.push({
+          step: `oauth:${tokenUrl}`,
+          status: resp.status,
+          is_html: isHtmlResponse(text),
+          body_preview: text.substring(0, 300),
+        });
+      } catch (err) {
+        diag.steps.push({
+          step: `oauth:${tokenUrl}`,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+  }
+
+  return jsonResponse({ success: true, debug: diag });
 }
 
 // ============================================================
@@ -621,12 +868,10 @@ Deno.serve(async (req: Request) => {
   const routeAction = action || pathParts[0] || "";
 
   try {
-    // Webhook endpoint (no auth required — protected by webhook secret if configured)
     if (routeAction === "webhook") {
       return await handleWebhook(req, supabase);
     }
 
-    // All other actions require config to exist
     const config = await getConfig(supabase);
     if (!config) {
       return errorResponse(400, "UltimatePOS is not configured. Set up the integration in the admin panel first.");
@@ -635,6 +880,9 @@ Deno.serve(async (req: Request) => {
     switch (routeAction) {
       case "test-connection":
         return await testConnection(config);
+
+      case "debug":
+        return await debugConnection(config);
 
       case "sync-products":
         return await syncProducts(supabase, config);
@@ -683,7 +931,7 @@ Deno.serve(async (req: Request) => {
       }
 
       default:
-        return errorResponse(404, `Unknown action: ${routeAction}. Available: test-connection, sync-products, sync-customers, push-sales, push-sale, status, webhook`);
+        return errorResponse(404, `Unknown action: ${routeAction}. Available: test-connection, debug, sync-products, sync-customers, push-sales, push-sale, status, webhook`);
     }
   } catch (error) {
     console.error("UltimatePOS sync error:", error);

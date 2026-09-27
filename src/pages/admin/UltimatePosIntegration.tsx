@@ -70,6 +70,9 @@ export default function UltimatePosIntegration() {
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastType>(null);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [debugInfo, setDebugInfo] = useState<any>(null);
+  const [debugging, setDebugging] = useState(false);
 
   // Config form state
   const [formData, setFormData] = useState({
@@ -169,12 +172,17 @@ export default function UltimatePosIntegration() {
 
   const handleTestConnection = async () => {
     setTesting(true);
+    setConnectionError(null);
     try {
-      await callEdgeFunction('test-connection');
-      showToast('success', 'Connection to UltimatePOS established');
+      const result = await callEdgeFunction('test-connection');
+      showToast('success', `Connected to UltimatePOS via ${result.working_url || 'API'}`);
+      setConnectionError(null);
       loadData();
     } catch (err: any) {
-      showToast('error', err.message || 'Connection test failed');
+      const errorDetails = err.message || 'Connection test failed';
+      setConnectionError(errorDetails);
+      showToast('error', 'Connection test failed — see diagnostics below');
+      loadData();
     } finally {
       setTesting(false);
     }
@@ -411,15 +419,79 @@ export default function UltimatePosIntegration() {
                       </p>
                     </div>
                   </div>
-                  <button
-                    onClick={handleTestConnection}
-                    disabled={testing || !config}
-                    className="flex items-center gap-2 rounded-full border border-ocean-200 px-4 py-2 text-sm font-semibold text-ocean-700 transition hover:bg-ocean-50 disabled:opacity-50"
-                  >
-                    {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
-                    Test Connection
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleDebug}
+                      disabled={debugging || !config}
+                      className="flex items-center gap-2 rounded-full border border-ink-200 px-4 py-2 text-sm font-semibold text-ink-600 transition hover:bg-ink-50 disabled:opacity-50"
+                    >
+                      {debugging ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />}
+                      Run Diagnostics
+                    </button>
+                    <button
+                      onClick={handleTestConnection}
+                      disabled={testing || !config}
+                      className="flex items-center gap-2 rounded-full border border-ocean-200 px-4 py-2 text-sm font-semibold text-ocean-700 transition hover:bg-ocean-50 disabled:opacity-50"
+                    >
+                      {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+                      Test Connection
+                    </button>
+                  </div>
                 </div>
+
+                {/* Connection Error Details */}
+                {connectionError && (
+                  <div className="mt-4 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <AlertCircle className="h-4 w-4 text-rose-600" />
+                      <p className="text-sm font-semibold text-rose-700">Connection Failed</p>
+                    </div>
+                    <pre className="whitespace-pre-wrap text-xs text-rose-600 max-h-48 overflow-y-auto">{connectionError}</pre>
+                  </div>
+                )}
+
+                {/* Debug Results */}
+                {debugInfo && (
+                  <div className="mt-4 rounded-2xl border border-ink-200 bg-ivory-50 p-4">
+                    <div className="mb-2 flex items-center gap-2">
+                      <Activity className="h-4 w-4 text-ocean-600" />
+                      <p className="text-sm font-semibold text-ink-700">Diagnostic Results</p>
+                    </div>
+                    <div className="mb-3 text-xs text-ink-500">
+                      <p className="mb-1"><span className="font-semibold">Configured URL:</span> {debugInfo.config?.api_url || '—'}</p>
+                      <p className="mb-1"><span className="font-semibold">Auth Mode:</span> {debugInfo.config?.auth_mode || '—'}</p>
+                      <p><span className="font-semibold">Candidate URLs tried:</span></p>
+                      <ul className="ml-4 list-disc">
+                        {(debugInfo.candidate_urls || []).map((u: string, i: number) => <li key={i} className="font-mono text-xs">{u}</li>)}
+                      </ul>
+                    </div>
+                    <div className="space-y-2">
+                      {debugInfo.steps?.map((step: any, i: number) => (
+                        <div key={i} className={`rounded-lg p-3 text-xs ${step.status === 200 || step.status === 'ok' ? 'bg-emerald-50' : step.is_html ? 'bg-amber-50' : 'bg-rose-50'}`}>
+                          <p className="font-mono font-semibold text-ink-700">{step.step}</p>
+                          {step.status && <p className="text-ink-500">HTTP {step.status} {step.is_html ? '(HTML page — not API)' : ''} {step.content_type ? `[${step.content_type}]` : ''}</p>}
+                          {step.error && <p className="text-rose-600">{step.error}</p>}
+                          {step.body_preview && <p className="mt-1 font-mono text-ink-400 max-h-20 overflow-y-auto">{step.body_preview}</p>}
+                          {step.message && <p className="mt-1 text-ink-500">{step.message}</p>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Help Tips */}
+                {!isConnected && (
+                  <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
+                    <p className="mb-2 text-sm font-semibold text-sky-700">Troubleshooting Tips</p>
+                    <ul className="space-y-1.5 text-xs text-sky-600">
+                      <li><span className="font-semibold">1. Check your API URL:</span> If UltimatePOS was installed with /public, include it (e.g. https://yoursite.com/public). The system automatically tries both with and without /public.</li>
+                      <li><span className="font-semibold">2. Verify API Connector module:</span> Go to UltimatePOS admin → Modules → make sure "API or Connector" module is installed and enabled.</li>
+                      <li><span className="font-semibold">3. Check Cloudflare:</span> If your site uses Cloudflare, use a Personal Access Token (PAT) instead of OAuth. Generate one from UltimatePOS admin → your profile → Personal Access Tokens.</li>
+                      <li><span className="font-semibold">4. Verify Business ID:</span> Make sure the business ID matches your UltimatePOS business number.</li>
+                      <li><span className="font-semibold">5. Use Run Diagnostics:</span> Click "Run Diagnostics" above for a detailed breakdown of what's happening with each URL.</li>
+                    </ul>
+                  </div>
+                )}
               </div>
 
               {/* Auto-sync settings summary */}
