@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
   Settings, Lock, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet
+  ExternalLink, Search, Layers, ShieldCheck, Wallet, ArrowRightLeft
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -45,6 +45,12 @@ const NAV_GROUPS = [
     label: 'Finance',
     items: [
       { path: '/admin/payment-transactions', icon: Receipt, label: 'Transactions' },
+    ],
+  },
+  {
+    label: 'Integrations',
+    items: [
+      { path: '/admin/ultimatepos', icon: ArrowRightLeft, label: 'UltimatePOS' },
     ],
   },
   {

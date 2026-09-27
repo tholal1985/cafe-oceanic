@@ -174,6 +174,7 @@ export interface Database {
           is_available: boolean;
           display_order: number;
           recipe: string | null;
+          ultimatepos_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -188,6 +189,7 @@ export interface Database {
           is_available?: boolean;
           display_order?: number;
           recipe?: string | null;
+          ultimatepos_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -202,6 +204,7 @@ export interface Database {
           is_available?: boolean;
           display_order?: number;
           recipe?: string | null;
+          ultimatepos_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -236,6 +239,7 @@ export interface Database {
           total_price: number;
           status: 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
           payment_method: 'card' | 'cash' | null;
+          ultimatepos_sale_id: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -245,6 +249,7 @@ export interface Database {
           total_price: number;
           status?: 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
           payment_method?: 'card' | 'cash' | null;
+          ultimatepos_sale_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -254,6 +259,7 @@ export interface Database {
           total_price?: number;
           status?: 'pending' | 'preparing' | 'ready' | 'completed' | 'cancelled';
           payment_method?: 'card' | 'cash' | null;
+          ultimatepos_sale_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -504,6 +510,144 @@ export interface Database {
           external_message_id?: string | null;
           sent_at?: string | null;
           created_at?: string;
+        };
+      };
+      ultimatepos_config: {
+        Row: {
+          id: string;
+          api_url: string;
+          client_id: string;
+          client_secret: string;
+          username: string;
+          password: string;
+          is_active: boolean;
+          auto_sync_products: boolean;
+          auto_sync_customers: boolean;
+          auto_push_sales: boolean;
+          last_product_sync_at: string | null;
+          last_customer_sync_at: string | null;
+          last_sale_push_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          api_url: string;
+          client_id: string;
+          client_secret: string;
+          username: string;
+          password: string;
+          is_active?: boolean;
+          auto_sync_products?: boolean;
+          auto_sync_customers?: boolean;
+          auto_push_sales?: boolean;
+          last_product_sync_at?: string | null;
+          last_customer_sync_at?: string | null;
+          last_sale_push_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          api_url?: string;
+          client_id?: string;
+          client_secret?: string;
+          username?: string;
+          password?: string;
+          is_active?: boolean;
+          auto_sync_products?: boolean;
+          auto_sync_customers?: boolean;
+          auto_push_sales?: boolean;
+          last_product_sync_at?: string | null;
+          last_customer_sync_at?: string | null;
+          last_sale_push_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+      };
+      ultimatepos_sync_logs: {
+        Row: {
+          id: string;
+          sync_type: string;
+          status: string;
+          records_processed: number;
+          records_created: number;
+          records_updated: number;
+          records_skipped: number;
+          error_message: string | null;
+          details: Json;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          sync_type: string;
+          status?: string;
+          records_processed?: number;
+          records_created?: number;
+          records_updated?: number;
+          records_skipped?: number;
+          error_message?: string | null;
+          details?: Json;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          sync_type?: string;
+          status?: string;
+          records_processed?: number;
+          records_created?: number;
+          records_updated?: number;
+          records_skipped?: number;
+          error_message?: string | null;
+          details?: Json;
+          created_at?: string;
+        };
+      };
+      ultimatepos_sale_pushes: {
+        Row: {
+          id: string;
+          order_id: string | null;
+          ultimatepos_sale_id: string | null;
+          status: string;
+          retry_count: number;
+          max_retries: number;
+          payload: Json;
+          response: Json;
+          error_message: string | null;
+          pushed_at: string | null;
+          next_retry_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          order_id?: string | null;
+          ultimatepos_sale_id?: string | null;
+          status?: string;
+          retry_count?: number;
+          max_retries?: number;
+          payload?: Json;
+          response?: Json;
+          error_message?: string | null;
+          pushed_at?: string | null;
+          next_retry_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          order_id?: string | null;
+          ultimatepos_sale_id?: string | null;
+          status?: string;
+          retry_count?: number;
+          max_retries?: number;
+          payload?: Json;
+          response?: Json;
+          error_message?: string | null;
+          pushed_at?: string | null;
+          next_retry_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
         };
       };
     };
