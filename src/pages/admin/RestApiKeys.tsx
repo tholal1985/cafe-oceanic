@@ -415,11 +415,13 @@ export default function RestApiKeys() {
                 </h3>
                 <div className="space-y-3 text-sm text-ink-600">
                   <p>1. Create an API key using the "Create key" button above. You'll receive a <strong>Consumer Key</strong> and <strong>Consumer Secret</strong> pair.</p>
-                  <p>2. Send both credentials as headers in every request:
-                    <code className="ml-1 rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Key</code> and
-                    <code className="ml-1 rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Secret</code>.
+                  <p>2. Send both credentials with every request. Three methods are supported:
+                    <br />&nbsp;&nbsp;a. Headers: <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Key</code> and <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Secret</code>
+                    <br />&nbsp;&nbsp;b. Query params: <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">?consumer_key=ck_...&amp;consumer_secret=cs_...</code>
+                    <br />&nbsp;&nbsp;c. HTTP Basic Auth: <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">Authorization: Basic base64(ck_...:cs_...)</code>
                   </p>
                   <p>3. All requests go to <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">{import.meta.env.VITE_SUPABASE_URL}/functions/v1/rest-api/</code></p>
+                  <p>4. For WooCommerce-compatible endpoints (UltimatePOS integration), prefix paths with <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">/wc/v3/</code> — e.g. <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">/wc/v3/products</code>. These return WooCommerce-shaped JSON with <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-WP-Total</code> pagination headers.</p>
                 </div>
               </div>
 
@@ -428,6 +430,7 @@ export default function RestApiKeys() {
                   <ShieldCheck size={18} className="text-ocean-700" />
                   Available Endpoints
                 </h3>
+                <p className="mb-3 text-xs text-ink-500">Two endpoint formats are supported: <strong>Native</strong> (simple JSON) and <strong>WooCommerce-compatible</strong> (prefixed with <code className="rounded bg-ivory-100 px-1 font-mono text-ocean-800">/wc/v3/</code>, returns WooCommerce-shaped responses with <code className="rounded bg-ivory-100 px-1 font-mono text-ocean-800">X-WP-Total</code> headers). Use the WooCommerce format to connect UltimatePOS or any system that speaks the WooCommerce REST API.</p>
                 <div className="overflow-x-auto">
                   <table className="w-full text-sm">
                     <thead className="border-b border-ink-100">
@@ -439,21 +442,21 @@ export default function RestApiKeys() {
                     </thead>
                     <tbody className="divide-y divide-ink-50">
                       {[
-                        { m: 'GET', e: '/products', d: 'List all products (paginated)' },
-                        { m: 'GET', e: '/products/{id}', d: 'Get a single product' },
-                        { m: 'POST', e: '/products', d: 'Create a product' },
-                        { m: 'PUT', e: '/products/{id}', d: 'Update a product' },
-                        { m: 'DELETE', e: '/products/{id}', d: 'Delete a product' },
-                        { m: 'GET', e: '/categories', d: 'List all categories' },
-                        { m: 'GET', e: '/orders', d: 'List all orders with items' },
-                        { m: 'GET', e: '/orders/{id}', d: 'Get a single order with items' },
-                        { m: 'POST', e: '/orders', d: 'Create an order (with order_items)' },
-                        { m: 'PUT', e: '/orders/{id}', d: 'Update an order' },
-                        { m: 'GET', e: '/customers', d: 'List all customers (searchable)' },
-                        { m: 'GET', e: '/customers/{id}', d: 'Get a single customer' },
-                        { m: 'POST', e: '/customers', d: 'Create a customer' },
-                        { m: 'PUT', e: '/customers/{id}', d: 'Update a customer' },
-                        { m: 'DELETE', e: '/customers/{id}', d: 'Delete a customer' },
+                        { m: 'GET', e: '/products or /wc/v3/products', d: 'List all products (paginated)' },
+                        { m: 'GET', e: '/products/{id} or /wc/v3/products/{id}', d: 'Get a single product' },
+                        { m: 'POST', e: '/products or /wc/v3/products', d: 'Create a product' },
+                        { m: 'PUT', e: '/products/{id} or /wc/v3/products/{id}', d: 'Update a product' },
+                        { m: 'DELETE', e: '/products/{id} or /wc/v3/products/{id}', d: 'Delete a product' },
+                        { m: 'GET', e: '/categories or /wc/v3/categories', d: 'List all categories' },
+                        { m: 'GET', e: '/orders or /wc/v3/orders', d: 'List all orders with items' },
+                        { m: 'GET', e: '/orders/{id} or /wc/v3/orders/{id}', d: 'Get a single order with items' },
+                        { m: 'POST', e: '/orders or /wc/v3/orders', d: 'Create an order (with line_items)' },
+                        { m: 'PUT', e: '/orders/{id} or /wc/v3/orders/{id}', d: 'Update an order' },
+                        { m: 'GET', e: '/customers or /wc/v3/customers', d: 'List all customers (searchable)' },
+                        { m: 'GET', e: '/customers/{id} or /wc/v3/customers/{id}', d: 'Get a single customer' },
+                        { m: 'POST', e: '/customers or /wc/v3/customers', d: 'Create a customer' },
+                        { m: 'PUT', e: '/customers/{id} or /wc/v3/customers/{id}', d: 'Update a customer' },
+                        { m: 'DELETE', e: '/customers/{id} or /wc/v3/customers/{id}', d: 'Delete a customer' },
                         { m: 'GET', e: '/addons', d: 'List all addons' },
                         { m: 'POST', e: '/addons', d: 'Create an addon' },
                         { m: 'PUT', e: '/addons/{id}', d: 'Update an addon' },
@@ -480,12 +483,17 @@ export default function RestApiKeys() {
               <div className="rounded-2xl border border-ink-100 bg-white p-6 shadow-soft">
                 <h3 className="mb-3 flex items-center gap-2 font-display text-lg font-semibold text-ink-900">
                   <Code size={18} className="text-ocean-700" />
-                  Example Request
+                  Example Requests
                 </h3>
-                <pre className="overflow-x-auto rounded-xl bg-ocean-950 p-4 text-xs text-ivory-100">
+                <p className="mb-2 text-xs font-semibold text-ink-500">Native format (headers):</p>
+                <pre className="mb-4 overflow-x-auto rounded-xl bg-ocean-950 p-4 text-xs text-ivory-100">
 {`curl -X GET "${import.meta.env.VITE_SUPABASE_URL}/functions/v1/rest-api/products?limit=10" \\
   -H "X-Consumer-Key: ck_your_consumer_key_here" \\
   -H "X-Consumer-Secret: cs_your_consumer_secret_here"`}
+                </pre>
+                <p className="mb-2 text-xs font-semibold text-ink-500">WooCommerce format (query params — for UltimatePOS):</p>
+                <pre className="overflow-x-auto rounded-xl bg-ocean-950 p-4 text-xs text-ivory-100">
+{`curl -X GET "${import.meta.env.VITE_SUPABASE_URL}/functions/v1/rest-api/wc/v3/products?per_page=10&consumer_key=ck_your_key&consumer_secret=cs_your_secret"`}
                 </pre>
               </div>
 
