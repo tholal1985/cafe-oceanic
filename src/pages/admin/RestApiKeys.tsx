@@ -9,7 +9,7 @@ import { supabase } from '../../lib/supabase';
 interface ApiKey {
   id: string;
   name: string;
-  key_prefix: string;
+  consumer_key: string | null;
   permissions: Record<string, string[]>;
   rate_limit: number;
   is_active: boolean;
@@ -29,6 +29,11 @@ interface ApiRequestLog {
   created_at: string;
 }
 
+interface GeneratedCredentials {
+  consumerKey: string;
+  consumerSecret: string;
+}
+
 const RESOURCES = ['products', 'categories', 'orders', 'customers', 'addons'];
 const PERMISSION_LABELS: Record<string, string> = {
   read: 'Read',
@@ -46,6 +51,17 @@ const DEFAULT_PERMISSIONS: Record<string, string[]> = {
 
 type ToastType = { type: 'success' | 'error' | 'info'; text: string } | null;
 
+function generateRandomHex(length: number): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+async function hashSecret(secret: string): Promise<string> {
+  const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(secret));
+  return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 export default function RestApiKeys() {
   const [keys, setKeys] = useState<ApiKey[]>([]);
   const [logs, setLogs] = useState<ApiRequestLog[]>([]);
@@ -55,9 +71,9 @@ export default function RestApiKeys() {
   const [newKeyPerms, setNewKeyPerms] = useState(DEFAULT_PERMISSIONS);
   const [newKeyRateLimit, setNewKeyRateLimit] = useState(1000);
   const [newKeyExpiry, setNewKeyExpiry] = useState('');
-  const [generatedKey, setGeneratedKey] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
-  const [showKey, setShowKey] = useState(false);
+  const [generatedCreds, setGeneratedCreds] = useState<GeneratedCredentials | null>(null);
+  const [copiedField, setCopiedField] = useState<'key' | 'secret' | null>(null);
+  const [showSecret, setShowSecret] = useState(false);
   const [toast, setToast] = useState<ToastType>(null);
   const [activeTab, setActiveTab] = useState<'keys' | 'logs' | 'docs'>('keys');
 
@@ -84,32 +100,22 @@ export default function RestApiKeys() {
 
   useEffect(() => { loadData(); }, [loadData]);
 
-  const generateApiKey = (): string => {
-    const bytes = new Uint8Array(32);
-    crypto.getRandomValues(bytes);
-    return 'cko_' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
-  };
-
-  const hashKey = async (key: string): Promise<string> => {
-    const hash = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(key));
-    return Array.from(new Uint8Array(hash)).map((b) => b.toString(16).padStart(2, '0')).join('');
-  };
-
   const handleCreate = async () => {
     if (!newKeyName.trim()) {
       showToast('error', 'Please enter a name for the API key');
       return;
     }
 
-    const rawKey = generateApiKey();
-    const hashHex = await hashKey(rawKey);
+    const consumerKey = 'ck_' + generateRandomHex(16);
+    const consumerSecret = 'cs_' + generateRandomHex(24);
+    const secretHash = await hashSecret(consumerSecret);
 
     try {
       const { data: userData } = await supabase.auth.getUser();
       const { error } = await supabase.from('api_keys').insert({
         name: newKeyName.trim(),
-        key_hash: hashHex,
-        key_prefix: rawKey.substring(0, 12),
+        consumer_key: consumerKey,
+        consumer_secret: secretHash,
         permissions: newKeyPerms,
         rate_limit: newKeyRateLimit,
         expires_at: newKeyExpiry || null,
@@ -118,12 +124,12 @@ export default function RestApiKeys() {
 
       if (error) throw error;
 
-      setGeneratedKey(rawKey);
-      setShowKey(true);
+      setGeneratedCreds({ consumerKey, consumerSecret });
+      setShowSecret(true);
       loadData();
-      showToast('success', 'API key created successfully');
+      showToast('success', 'API credentials created successfully');
     } catch (err: any) {
-      showToast('error', err.message || 'Failed to create API key');
+      showToast('error', err.message || 'Failed to create API credentials');
     }
   };
 
@@ -147,10 +153,10 @@ export default function RestApiKeys() {
     }
   };
 
-  const copyToClipboard = (text: string) => {
+  const copyToClipboard = (text: string, field: 'key' | 'secret') => {
     navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
   const closeModal = () => {
@@ -159,8 +165,8 @@ export default function RestApiKeys() {
     setNewKeyPerms(DEFAULT_PERMISSIONS);
     setNewKeyRateLimit(1000);
     setNewKeyExpiry('');
-    setGeneratedKey(null);
-    setShowKey(false);
+    setGeneratedCreds(null);
+    setShowSecret(false);
   };
 
   const formatDate = (dateStr: string | null) => {
@@ -199,7 +205,7 @@ export default function RestApiKeys() {
           <div>
             <h1 className="font-display text-3xl text-ink-900 sm:text-4xl">REST API Keys</h1>
             <p className="mt-1 text-sm text-ink-500">
-              Generate API keys to let external systems access your products, orders, and customers.
+              Generate Consumer Key and Consumer Secret pairs to let external systems access your data.
             </p>
           </div>
           <button
@@ -283,7 +289,7 @@ export default function RestApiKeys() {
                           </div>
                           <div>
                             <h3 className="font-display text-lg text-ink-900">{key.name}</h3>
-                            <p className="font-mono text-xs text-ink-400">{key.key_prefix}...</p>
+                            <p className="font-mono text-xs text-ink-400">{key.consumer_key || '—'}</p>
                           </div>
                         </div>
                         <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wider ${
@@ -376,7 +382,6 @@ export default function RestApiKeys() {
                       <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Method</th>
                       <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Status</th>
                       <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">IP</th>
-                      <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Time</th>
                       <th className="px-4 py-3 text-right text-[10px] font-semibold uppercase tracking-wider text-ink-400">Duration</th>
                       <th className="px-4 py-3 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">When</th>
                     </tr>
@@ -388,7 +393,6 @@ export default function RestApiKeys() {
                         <td className="px-4 py-3 text-xs font-medium text-ink-600">{log.method}</td>
                         <td className={`px-4 py-3 text-xs font-semibold ${getStatusColor(log.status_code)}`}>{log.status_code}</td>
                         <td className="px-4 py-3 font-mono text-xs text-ink-500">{log.ip_address}</td>
-                        <td className="px-4 py-3 text-xs text-ink-500 tabular-nums">{log.response_time_ms}ms</td>
                         <td className="px-4 py-3 text-right text-xs text-ink-500 tabular-nums">{log.response_time_ms}ms</td>
                         <td className="px-4 py-3 text-xs text-ink-400">{formatDate(log.created_at)}</td>
                       </tr>
@@ -410,8 +414,11 @@ export default function RestApiKeys() {
                   Getting Started
                 </h3>
                 <div className="space-y-3 text-sm text-ink-600">
-                  <p>1. Create an API key using the "Create key" button above.</p>
-                  <p>2. Use the key in the <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Api-Key</code> header of your requests.</p>
+                  <p>1. Create an API key using the "Create key" button above. You'll receive a <strong>Consumer Key</strong> and <strong>Consumer Secret</strong> pair.</p>
+                  <p>2. Send both credentials as headers in every request:
+                    <code className="ml-1 rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Key</code> and
+                    <code className="ml-1 rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">X-Consumer-Secret</code>.
+                  </p>
                   <p>3. All requests go to <code className="rounded bg-ivory-100 px-1.5 py-0.5 font-mono text-xs text-ocean-800">{import.meta.env.VITE_SUPABASE_URL}/functions/v1/rest-api/</code></p>
                 </div>
               </div>
@@ -477,7 +484,8 @@ export default function RestApiKeys() {
                 </h3>
                 <pre className="overflow-x-auto rounded-xl bg-ocean-950 p-4 text-xs text-ivory-100">
 {`curl -X GET "${import.meta.env.VITE_SUPABASE_URL}/functions/v1/rest-api/products?limit=10" \\
-  -H "X-Api-Key: cko_your_api_key_here"`}
+  -H "X-Consumer-Key: ck_your_consumer_key_here" \\
+  -H "X-Consumer-Secret: cs_your_consumer_secret_here"`}
                 </pre>
               </div>
 
@@ -527,38 +535,59 @@ export default function RestApiKeys() {
               onClick={(e) => e.stopPropagation()}
               className="w-full max-w-lg rounded-3xl bg-white p-6 shadow-2xl"
             >
-              {generatedKey ? (
+              {generatedCreds ? (
                 <div>
                   <div className="mb-4 flex items-center gap-3">
                     <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-50 text-emerald-700">
                       <Check className="h-5 w-5" />
                     </div>
                     <div>
-                      <h2 className="font-display text-lg font-semibold text-ink-900">API Key Created</h2>
-                      <p className="text-xs text-ink-500">Copy this key now. You won't be able to see it again.</p>
+                      <h2 className="font-display text-lg font-semibold text-ink-900">Credentials Created</h2>
+                      <p className="text-xs text-ink-500">Copy these now. The Consumer Secret won't be shown again.</p>
                     </div>
                   </div>
 
-                  <div className="mb-4">
+                  {/* Consumer Key */}
+                  <div className="mb-3">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-500">Consumer Key</label>
                     <div className="relative">
                       <input
-                        type={showKey ? 'text' : 'password'}
-                        value={generatedKey}
+                        type="text"
+                        value={generatedCreds.consumerKey}
                         readOnly
-                        className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-20 font-mono text-sm text-ink-900 outline-none"
+                        className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-12 font-mono text-sm text-ink-900 outline-none"
+                      />
+                      <button
+                        onClick={() => copyToClipboard(generatedCreds.consumerKey, 'key')}
+                        className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
+                      >
+                        {copiedField === 'key' ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Consumer Secret */}
+                  <div className="mb-4">
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-500">Consumer Secret</label>
+                    <div className="relative">
+                      <input
+                        type={showSecret ? 'text' : 'password'}
+                        value={generatedCreds.consumerSecret}
+                        readOnly
+                        className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-16 font-mono text-sm text-ink-900 outline-none"
                       />
                       <div className="absolute right-2 top-1/2 flex -translate-y-1/2 gap-1">
                         <button
-                          onClick={() => setShowKey(!showKey)}
+                          onClick={() => setShowSecret(!showSecret)}
                           className="rounded p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
                         >
-                          {showKey ? <EyeOff size={16} /> : <Eye size={16} />}
+                          {showSecret ? <EyeOff size={16} /> : <Eye size={16} />}
                         </button>
                         <button
-                          onClick={() => copyToClipboard(generatedKey)}
+                          onClick={() => copyToClipboard(generatedCreds.consumerSecret, 'secret')}
                           className="rounded p-1.5 text-ink-400 hover:bg-ink-100 hover:text-ink-700"
                         >
-                          {copied ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
+                          {copiedField === 'secret' ? <Check size={16} className="text-emerald-600" /> : <Copy size={16} />}
                         </button>
                       </div>
                     </div>
@@ -566,7 +595,7 @@ export default function RestApiKeys() {
 
                   <div className="mb-4 rounded-lg bg-amber-50 p-3 ring-1 ring-amber-200">
                     <p className="text-xs text-amber-800">
-                      <strong>Important:</strong> Store this key securely. For security reasons, the full key value is only shown once at creation. You can still manage permissions and revoke the key later.
+                      <strong>Important:</strong> Store these credentials securely. The Consumer Secret is only shown once at creation. You can still manage permissions and revoke the key later.
                     </p>
                   </div>
 
@@ -665,7 +694,7 @@ export default function RestApiKeys() {
                       onClick={handleCreate}
                       className="w-full rounded-lg bg-ocean-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ocean-900"
                     >
-                      Generate API Key
+                      Generate Consumer Key & Secret
                     </button>
                   </div>
                 </div>

@@ -522,8 +522,10 @@ export interface Database {
         Row: {
           id: string;
           name: string;
-          key_hash: string;
-          key_prefix: string;
+          key_hash: string | null;
+          key_prefix: string | null;
+          consumer_key: string | null;
+          consumer_secret: string | null;
           permissions: Json;
           rate_limit: number;
           is_active: boolean;
@@ -536,8 +538,10 @@ export interface Database {
         Insert: {
           id?: string;
           name: string;
-          key_hash: string;
-          key_prefix: string;
+          key_hash?: string | null;
+          key_prefix?: string | null;
+          consumer_key?: string | null;
+          consumer_secret?: string | null;
           permissions?: Json;
           rate_limit?: number;
           is_active?: boolean;
@@ -550,8 +554,10 @@ export interface Database {
         Update: {
           id?: string;
           name?: string;
-          key_hash?: string;
-          key_prefix?: string;
+          key_hash?: string | null;
+          key_prefix?: string | null;
+          consumer_key?: string | null;
+          consumer_secret?: string | null;
           permissions?: Json;
           rate_limit?: number;
           is_active?: boolean;

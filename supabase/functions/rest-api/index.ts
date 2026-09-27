@@ -4,7 +4,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Api-Key, X-Client-Info, Apikey",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Consumer-Key, X-Consumer-Secret, X-Client-Info, Apikey",
 };
 
 const supabaseUrl = Deno.env.get("SUPABASE_URL")!;
@@ -18,22 +18,25 @@ interface ApiKeyValidation {
   permissions: Record<string, string[]> | null;
 }
 
-async function validateKey(apiKey: string): Promise<ApiKeyValidation | null> {
-  const supabase = createClient(supabaseUrl, supabaseKey);
-
-  const keyHash = await crypto.subtle.digest(
+async function hashSecret(secret: string): Promise<string> {
+  const hash = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(apiKey),
+    new TextEncoder().encode(secret),
   );
-  const hashHex = Array.from(new Uint8Array(keyHash))
+  return Array.from(new Uint8Array(hash))
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
+}
+
+async function validateKey(consumerKey: string, consumerSecret: string): Promise<ApiKeyValidation | null> {
+  const supabase = createClient(supabaseUrl, supabaseKey);
+  const secretHash = await hashSecret(consumerSecret);
 
   const { data, error } = await supabase
     .rpc("validate_api_key", {
-      p_key_hash: hashHex,
+      p_consumer_key: consumerKey,
+      p_consumer_secret_hash: secretHash,
       p_endpoint: "",
-      p_permission: "",
     })
     .maybeSingle();
 
@@ -106,17 +109,19 @@ Deno.serve(async (req: Request) => {
     return errorResponse(200, "REST API is running. Available endpoints: /products, /categories, /orders, /customers, /addons");
   }
 
-  const apiKey = req.headers.get("x-api-key") || new URLSearchParams(url.search).get("api_key");
-  if (!apiKey) {
+  const consumerKey = req.headers.get("x-consumer-key") || url.searchParams.get("consumer_key");
+  const consumerSecret = req.headers.get("x-consumer-secret") || url.searchParams.get("consumer_secret");
+
+  if (!consumerKey || !consumerSecret) {
     await logRequest(null, resource, req.method, 401, req, startTime);
-    return errorResponse(401, "Missing API key. Provide it via the X-Api-Key header or api_key query parameter.");
+    return errorResponse(401, "Missing credentials. Provide Consumer Key and Consumer Secret via the X-Consumer-Key and X-Consumer-Secret headers, or as consumer_key and consumer_secret query parameters.");
   }
 
-  const validation = await validateKey(apiKey);
+  const validation = await validateKey(consumerKey, consumerSecret);
   if (!validation || !validation.is_valid) {
     const reason = validation && validation.request_count >= validation.rate_limit
       ? "Rate limit exceeded. Too many requests in the last hour."
-      : "Invalid, inactive, or expired API key.";
+      : "Invalid, inactive, or expired credentials.";
     await logRequest(validation?.api_key_id ?? null, resource, req.method, 401, req, startTime);
     return errorResponse(401, reason);
   }
