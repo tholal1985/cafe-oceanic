@@ -100,7 +100,26 @@ function isHtmlResponse(text: string): boolean {
   return lower.startsWith("<!doctype") || lower.startsWith("<html") || lower.startsWith("<head");
 }
 
+function isCloudflareChallenge(text: string): boolean {
+  const lower = text.toLowerCase();
+  return lower.includes("just a moment") || lower.includes("cf-browser-verification") || lower.includes("cf-challenge") || lower.includes("_cf_chl_opt") || (lower.includes("cloudflare") && lower.includes("ray id"));
+}
+
+function cloudflareError(context: string): string {
+  return `${context}: Cloudflare is blocking the request with a bot challenge ("Just a moment..."). ` +
+    `This happens when Cloudflare's "Under Attack" mode or "Bot Fight Mode" is enabled. ` +
+    `To fix this, go to your Cloudflare dashboard and do ONE of the following:\n` +
+    `1. Create a Configuration Rule that skips the challenge for your API paths (e.g. /public/connector/api/* and /public/oauth/token).\n` +
+    `2. Add the Supabase Edge Function IP ranges to your Cloudflare IP Allowlist.\n` +
+    `3. Temporarily disable "Under Attack" mode (Security → Settings → Security Level).\n` +
+    `4. Disable "Bot Fight Mode" (Security → Bots → Bot Fight Mode).\n` +
+    `The API cannot solve a Cloudflare JS challenge — the challenge must be bypassed at the Cloudflare level.`;
+}
+
 function checkApiResponse(resp: Response, text: string, context: string): void {
+  if (isCloudflareChallenge(text)) {
+    throw new Error(cloudflareError(context));
+  }
   if (isHtmlResponse(text)) {
     throw new Error(
       `${context}: UltimatePOS returned an HTML page instead of a JSON API response. ` +
@@ -146,11 +165,17 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
         },
         body: body.toString(),
       });
 
       const text = await resp.text();
+
+      if (isCloudflareChallenge(text)) {
+        errors.push(cloudflareError(`${tokenUrl}`));
+        continue;
+      }
 
       if (isHtmlResponse(text)) {
         errors.push(`${tokenUrl} returned HTML (not a valid API endpoint)`);
@@ -186,6 +211,7 @@ function authHeaders(token: string): Record<string, string> {
     "Authorization": `Bearer ${token}`,
     "Accept": "application/json",
     "Content-Type": "application/json",
+    "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
   };
 }
 
@@ -216,6 +242,11 @@ async function apiRequest(
         body: body ? JSON.stringify(body) : undefined,
       });
       const text = await resp.text();
+
+      if (isCloudflareChallenge(text)) {
+        errors.push(cloudflareError(url));
+        continue;
+      }
 
       if (isHtmlResponse(text)) {
         errors.push(`${url} returned HTML (not a valid API endpoint)`);
@@ -634,6 +665,12 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
       const resp = await fetch(apiUrl, { method: "GET", headers: authHeaders(token) });
       const text = await resp.text();
 
+      if (isCloudflareChallenge(text)) {
+        apiErrors.push(`${baseUrl} → Cloudflare bot challenge blocking the request`);
+        diagnostics.push({ step: `api-test:${baseUrl}`, status: "cloudflare", message: "Cloudflare is blocking this request with a bot challenge (\"Just a moment...\"). You must bypass Cloudflare for your API paths. See the troubleshooting section below." });
+        continue;
+      }
+
       if (isHtmlResponse(text)) {
         apiErrors.push(`${baseUrl} → HTML response (not an API endpoint)`);
         diagnostics.push({ step: `api-test:${baseUrl}`, status: "html", message: "Got HTML page instead of JSON. This URL is wrong or the API Connector module is not installed." });
@@ -676,9 +713,9 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
   return errorResponse(502, "Connection test failed", JSON.stringify({
     diagnostics,
     summary: "All URL attempts failed. Most common causes:\n" +
-      "1. Wrong API URL — if UltimatePOS was installed with /public, add it to your URL (e.g. https://yoursite.com/public)\n" +
-      "2. API Connector module not installed — go to UltimatePOS admin → Modules → install/enable 'API or Connector'\n" +
-      "3. Cloudflare blocking — if your site uses Cloudflare, the API may need a Personal Access Token (PAT) instead of OAuth\n" +
+      "1. CLOUDFLARE BLOCKING — if your site uses Cloudflare (mudhaamv.com does), you MUST create a Configuration Rule to skip the challenge for API paths (/public/connector/api/*, /public/oauth/token). Go to Cloudflare Dashboard → Rules → Configuration Rules → create a rule for the API paths with Security Level set to \"Essentially Off\". Also disable Bot Fight Mode.\n" +
+      "2. Wrong API URL — if UltimatePOS was installed with /public, add it to your URL (e.g. https://yoursite.com/public)\n" +
+      "3. API Connector module not installed — go to UltimatePOS admin → Modules → install/enable 'API or Connector'\n" +
       "4. Wrong business_id — make sure the business ID matches your UltimatePOS business",
     tried_urls: urlsToTry,
   }, null, 2));
@@ -715,6 +752,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
         status: resp.status,
         content_type: resp.headers.get("content-type"),
         is_html: isHtmlResponse(text),
+        is_cloudflare: isCloudflareChallenge(text),
         body_preview: text.substring(0, 200),
       });
     } catch (err) {
@@ -733,7 +771,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
         ? config.personal_access_token
         : null;
 
-      const headers: Record<string, string> = { "Accept": "application/json" };
+      const headers: Record<string, string> = { "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       const resp = await fetch(apiUrl, { method: "GET", headers });
@@ -742,6 +780,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
         step: `api:${apiUrl}`,
         status: resp.status,
         is_html: isHtmlResponse(text),
+        is_cloudflare: isCloudflareChallenge(text),
         body_preview: text.substring(0, 300),
       });
     } catch (err) {
@@ -759,7 +798,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
       try {
         const resp = await fetch(tokenUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)" },
           body: "grant_type=password&test=1",
         });
         const text = await resp.text();
@@ -767,6 +806,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
           step: `oauth:${tokenUrl}`,
           status: resp.status,
           is_html: isHtmlResponse(text),
+          is_cloudflare: isCloudflareChallenge(text),
           body_preview: text.substring(0, 300),
         });
       } catch (err) {

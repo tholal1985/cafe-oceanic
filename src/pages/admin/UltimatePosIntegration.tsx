@@ -556,8 +556,9 @@ export default function UltimatePosIntegration() {
                     </div>
                     <div className="space-y-2">
                       {debugInfo.steps?.map((step: any, i: number) => (
-                        <div key={i} className={`rounded-lg p-3 text-xs ${step.status === 200 || step.status === 'ok' ? 'bg-emerald-50' : step.is_html ? 'bg-amber-50' : 'bg-rose-50'}`}>
+                        <div key={i} className={`rounded-lg p-3 text-xs ${step.is_cloudflare ? 'bg-amber-50 border border-amber-200' : step.status === 200 || step.status === 'ok' ? 'bg-emerald-50' : step.is_html ? 'bg-amber-50' : 'bg-rose-50'}`}>
                           <p className="font-mono font-semibold text-ink-700">{step.step}</p>
+                          {step.is_cloudflare && <p className="mt-1 font-semibold text-amber-700">⚠ Cloudflare bot challenge detected — Cloudflare is blocking this request. Create a Configuration Rule to skip the challenge for API paths.</p>}
                           {step.status && <p className="text-ink-500">HTTP {step.status} {step.is_html ? '(HTML page — not API)' : ''} {step.content_type ? `[${step.content_type}]` : ''}</p>}
                           {step.error && <p className="text-rose-600">{step.error}</p>}
                           {step.body_preview && <p className="mt-1 font-mono text-ink-400 max-h-20 overflow-y-auto">{step.body_preview}</p>}
@@ -573,9 +574,10 @@ export default function UltimatePosIntegration() {
                   <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 p-4">
                     <p className="mb-2 text-sm font-semibold text-sky-700">Troubleshooting Tips</p>
                     <ul className="space-y-1.5 text-xs text-sky-600">
+                      <li><span className="font-semibold">0. CLOUDFLARE (most likely cause for mudhaamv.com):</span> Your site uses Cloudflare, which blocks API requests with a "Just a moment..." bot challenge. Fix this by going to Cloudflare Dashboard → Rules → Configuration Rules → create a rule that matches <code className="rounded bg-sky-100 px-1 font-mono">/public/connector/api/*</code> and <code className="rounded bg-sky-100 px-1 font-mono">/public/oauth/token</code> and sets Security Level to "Essentially Off". Also disable Security → Bots → Bot Fight Mode.</li>
                       <li><span className="font-semibold">1. Check your API URL:</span> If UltimatePOS was installed with /public, include it (e.g. https://yoursite.com/public). The system automatically tries both with and without /public.</li>
                       <li><span className="font-semibold">2. Verify API Connector module:</span> Go to UltimatePOS admin → Modules → make sure "API or Connector" module is installed and enabled.</li>
-                      <li><span className="font-semibold">3. Check Cloudflare:</span> If your site uses Cloudflare, use a Personal Access Token (PAT) instead of OAuth. Generate one from UltimatePOS admin → your profile → Personal Access Tokens.</li>
+                      <li><span className="font-semibold">3. Use PAT mode:</span> If Cloudflare blocks OAuth, use a Personal Access Token (PAT) instead. Generate one from UltimatePOS admin → your profile → Personal Access Tokens.</li>
                       <li><span className="font-semibold">4. Verify Business ID:</span> Make sure the business ID matches your UltimatePOS business number.</li>
                       <li><span className="font-semibold">5. Use Run Diagnostics:</span> Click "Run Diagnostics" above for a detailed breakdown of what's happening with each URL.</li>
                     </ul>
