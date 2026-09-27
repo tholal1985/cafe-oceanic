@@ -27,7 +27,7 @@ import Customers from './pages/admin/Customers';
 import SystemSettings from './pages/admin/SystemSettings';
 import ProductPackLicenses from './pages/admin/ProductPackLicenses';
 import ActivationKeys from './pages/admin/ActivationKeys';
-import UltimatePosIntegration from './pages/admin/UltimatePosIntegration';
+import RestApiKeys from './pages/admin/RestApiKeys';
 import PackTiers from './pages/admin/PackTiers';
 import CustomerBilling from './pages/admin/CustomerBilling';
 
@@ -71,8 +71,8 @@ function App() {
             <Route path="backup" element={<BackupRestore />} />
             <Route path="pack-licenses" element={<ProductPackLicenses />} />
             <Route path="pack-tiers" element={<PackTiers />} />
+            <Route path="rest-api" element={<RestApiKeys />} />
             <Route path="activation-keys" element={<ActivationKeys />} />
-            <Route path="ultimatepos" element={<UltimatePosIntegration />} />
           </Route>
         </Routes>
       </IdleTimer>

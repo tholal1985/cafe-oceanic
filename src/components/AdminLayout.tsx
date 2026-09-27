@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
   Settings, Lock, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet, ArrowRightLeft
+  ExternalLink, Search, Layers, ShieldCheck, Wallet, Code
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -50,7 +50,7 @@ const NAV_GROUPS = [
   {
     label: 'Integrations',
     items: [
-      { path: '/admin/ultimatepos', icon: ArrowRightLeft, label: 'UltimatePOS' },
+      { path: '/admin/rest-api', icon: Code, label: 'REST API Keys' },
     ],
   },
   {

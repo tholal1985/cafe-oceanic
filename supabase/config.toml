@@ -31,5 +31,5 @@ verify_jwt = true
 [functions.verify-payment]
 verify_jwt = true
 
-[functions.ultimatepos-sync]
-verify_jwt = true
+[functions.rest-api]
+verify_jwt = false
