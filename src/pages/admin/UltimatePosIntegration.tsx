@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import {
-  RefreshCw, Link2, Link2Off, Check, X, AlertCircle, Clock,
+  RefreshCw, Link2, Link2Off, AlertCircle,
   Package, Users, ShoppingCart, Settings, Zap, ArrowRight,
   Activity, Server, Eye, EyeOff, Save, RotateCw, Loader2,
 } from 'lucide-react';
@@ -155,10 +155,10 @@ export default function UltimatePosIntegration() {
     setSaving(true);
     try {
       if (config) {
-        const { error } = await supabase.from('ultimatepos_config').update(formData).eq('id', config.id);
+        const { error } = await (supabase.from('ultimatepos_config') as any).update(formData).eq('id', config.id);
         if (error) throw error;
       } else {
-        const { error } = await supabase.from('ultimatepos_config').insert(formData);
+        const { error } = await (supabase.from('ultimatepos_config') as any).insert(formData);
         if (error) throw error;
       }
       showToast('success', 'Configuration saved successfully');
@@ -185,6 +185,21 @@ export default function UltimatePosIntegration() {
       loadData();
     } finally {
       setTesting(false);
+    }
+  };
+
+  const handleDebug = async () => {
+    setDebugging(true);
+    setDebugInfo(null);
+    try {
+      const result = await callEdgeFunction('debug');
+      setDebugInfo(result.debug || result);
+      showToast('info', 'Diagnostics completed — see results below');
+    } catch (err: any) {
+      setConnectionError(err.message || 'Debug failed');
+      showToast('error', 'Diagnostics failed');
+    } finally {
+      setDebugging(false);
     }
   };
 
@@ -227,16 +242,6 @@ export default function UltimatePosIntegration() {
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'Never';
     return new Date(dateStr).toLocaleString();
-  };
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case 'success': case 'connected': return 'text-emerald-600';
-      case 'failed': case 'error': return 'text-rose-600';
-      case 'partial': case 'retrying': return 'text-amber-600';
-      case 'pending': return 'text-sky-600';
-      default: return 'text-ink-400';
-    }
   };
 
   const getStatusBg = (status: string) => {
