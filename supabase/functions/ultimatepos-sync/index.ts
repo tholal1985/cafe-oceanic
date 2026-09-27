@@ -13,6 +13,7 @@ const supabaseKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 interface UltimatePosConfig {
   id: string;
   api_url: string | null;
+  direct_server_ip: string | null;
   client_id: string | null;
   client_secret: string | null;
   username: string | null;
@@ -72,15 +73,41 @@ async function getConfig(supabase: any): Promise<UltimatePosConfig | null> {
 }
 
 // ============================================================
-// URL normalization
-// UltimatePOS can be installed at various paths:
-//   https://example.com/  (if /public was removed)
-//   https://example.com/public/
-//   https://example.com/pos/public/
-// We try the URL as-is first, then with /public appended.
+// URL normalization & Direct IP bypass
+// When direct_server_ip is set, we connect to the IP directly
+// with a Host header so the server routes correctly, bypassing
+// Cloudflare's bot challenge entirely.
 // ============================================================
 function normalizeBaseUrl(rawUrl: string): string {
   return rawUrl.replace(/\/+$/, "");
+}
+
+function getHostFromUrl(rawUrl: string): string {
+  try {
+    const u = new URL(rawUrl);
+    return u.host;
+  } catch {
+    return "";
+  }
+}
+
+function buildDirectIpUrl(config: UltimatePosConfig, path: string): string | null {
+  if (!config.direct_server_ip) return null;
+  const base = normalizeBaseUrl(config.api_url || "");
+  const host = getHostFromUrl(base);
+  if (!host) return null;
+  // Strip protocol and host from the base URL, keep only the path portion
+  let urlPath = "";
+  try {
+    const u = new URL(base);
+    urlPath = u.pathname.replace(/\/+$/, "");
+  } catch {}
+  return `http://${config.direct_server_ip}${urlPath}${path}`;
+}
+
+function getDirectIpHost(config: UltimatePosConfig): string | null {
+  if (!config.direct_server_ip) return null;
+ return getHostFromUrl(config.api_url || "");
 }
 
 function getCandidateBaseUrls(rawUrl: string): string[] {
@@ -142,6 +169,44 @@ function checkApiResponse(resp: Response, text: string, context: string): void {
 async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string; baseUrl: string }> {
   if (config.auth_mode === "pat" && config.personal_access_token) {
     return { token: config.personal_access_token, baseUrl: normalizeBaseUrl(config.api_url || "") };
+  }
+
+  const directHost = getDirectIpHost(config);
+  const directTokenUrl = buildDirectIpUrl(config, "/oauth/token");
+
+  // Try direct IP first if configured
+  if (directTokenUrl && directHost) {
+    try {
+      const body = new URLSearchParams({
+        grant_type: "password",
+        client_id: config.client_id || "",
+        client_secret: config.client_secret || "",
+        username: config.username || "",
+        password: config.password || "",
+        scope: "pos",
+      });
+
+      const resp = await fetch(directTokenUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json",
+          "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
+          "Host": directHost,
+        },
+        body: body.toString(),
+      });
+
+      const text = await resp.text();
+      if (!isHtmlResponse(text) && !isCloudflareChallenge(text) && resp.ok) {
+        const tokenData = JSON.parse(text);
+        if (tokenData.access_token) {
+          return { token: tokenData.access_token, baseUrl: `http://${config.direct_server_ip}` };
+        }
+      }
+    } catch {
+      // Fall through to normal candidates
+    }
   }
 
   // OAuth password grant — try candidate URLs
@@ -206,13 +271,15 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
   );
 }
 
-function authHeaders(token: string): Record<string, string> {
-  return {
+function authHeaders(token: string, host?: string | null): Record<string, string> {
+  const headers: Record<string, string> = {
     "Authorization": `Bearer ${token}`,
     "Accept": "application/json",
     "Content-Type": "application/json",
     "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
   };
+  if (host) headers["Host"] = host;
+  return headers;
 }
 
 // ============================================================
@@ -225,8 +292,35 @@ async function apiRequest(
   body?: any,
 ): Promise<{ data: any; baseUrl: string; rawText: string; status: number }> {
   const { token, baseUrl: authBaseUrl } = await getAuthToken(config);
+  const directHost = getDirectIpHost(config);
+  const directUrl = buildDirectIpUrl(config, path);
 
-  // For PAT mode, also try /public fallback if the first attempt returns HTML
+  // Try direct IP first if configured
+  if (directUrl && directHost) {
+    try {
+      const resp = await fetch(directUrl, {
+        method,
+        headers: authHeaders(token, directHost),
+        body: body ? JSON.stringify(body) : undefined,
+      });
+      const text = await resp.text();
+
+      if (!isCloudflareChallenge(text) && !isHtmlResponse(text)) {
+        if (resp.ok) {
+          let data: any;
+          try { data = JSON.parse(text); } catch { throw new Error(`UltimatePOS returned non-JSON: ${text.substring(0, 300)}`); }
+          return { data, baseUrl: `http://${config.direct_server_ip}`, rawText: text, status: resp.status };
+        }
+        // 401/403/422 etc — the server responded, don't try other URLs
+        throw new Error(`UltimatePOS API returned HTTP ${resp.status}: ${text.substring(0, 500)}`);
+      }
+    } catch (err) {
+      if (err instanceof Error && err.message.includes("UltimatePOS API returned")) throw err;
+      // Fall through to normal candidates
+    }
+  }
+
+  // Normal candidate URLs
   const candidates = config.auth_mode === "pat"
     ? getCandidateBaseUrls(config.api_url || "")
     : [authBaseUrl];
@@ -655,9 +749,42 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
     return errorResponse(502, "Authentication failed", JSON.stringify(diagnostics, null, 2));
   }
 
-  // Step 2: Try API call with each candidate URL
+  // Step 2: Try API call — direct IP first, then candidate URLs
+  const directHost = getDirectIpHost(config);
+  const directApiUrl = buildDirectIpUrl(config, `/connector/api/business?business_id=${config.business_id}`);
   const urlsToTry = workingBaseUrl ? [workingBaseUrl, ...candidates.filter(c => c !== workingBaseUrl)] : candidates;
   const apiErrors: string[] = [];
+
+  // Try direct IP first
+  if (directApiUrl && directHost) {
+    try {
+      const resp = await fetch(directApiUrl, { method: "GET", headers: authHeaders(token, directHost) });
+      const text = await resp.text();
+
+      if (!isCloudflareChallenge(text) && !isHtmlResponse(text) && resp.ok) {
+        const data = JSON.parse(text);
+        diagnostics.push({ step: `api-test:direct-ip`, status: "ok", message: `Connected via direct IP ${config.direct_server_ip} (bypassing Cloudflare)` });
+
+        const supabase = createClient(supabaseUrl, supabaseKey);
+        await supabase.from("ultimatepos_config").update({
+          last_connected_at: new Date().toISOString(),
+          connection_status: "connected",
+        }).eq("id", config.id);
+
+        return jsonResponse({
+          success: true,
+          connected: true,
+          working_url: `direct-ip:${config.direct_server_ip}`,
+          business: data,
+          diagnostics,
+        });
+      } else {
+        diagnostics.push({ step: `api-test:direct-ip`, status: "error", message: `Direct IP returned ${resp.status}: ${text.substring(0, 200)}` });
+      }
+    } catch (err) {
+      diagnostics.push({ step: `api-test:direct-ip`, status: "error", message: err instanceof Error ? err.message : String(err) });
+    }
+  }
 
   for (const baseUrl of urlsToTry) {
     const apiUrl = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
@@ -728,6 +855,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
   const diag: any = {
     config: {
       api_url: config.api_url,
+      direct_server_ip: config.direct_server_ip,
       auth_mode: config.auth_mode,
       business_id: config.business_id,
       location_id: config.location_id,
@@ -760,6 +888,32 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
         step: `reachability:${baseUrl}`,
         error: err instanceof Error ? err.message : String(err),
       });
+    }
+  }
+
+  // Test 1b: Check if direct IP is reachable
+  if (config.direct_server_ip) {
+    const directHost = getDirectIpHost(config);
+    const directUrl = buildDirectIpUrl(config, `/connector/api/business?business_id=${config.business_id}`);
+    if (directUrl && directHost) {
+      try {
+        const token = config.auth_mode === "pat" && config.personal_access_token
+          ? config.personal_access_token : null;
+        const headers: Record<string, string> = { "Accept": "application/json", "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)", "Host": directHost };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const resp = await fetch(directUrl, { method: "GET", headers });
+        const text = await resp.text();
+        diag.steps.push({
+          step: `direct-ip:${config.direct_server_ip}`,
+          status: resp.status,
+          is_html: isHtmlResponse(text),
+          is_cloudflare: isCloudflareChallenge(text),
+          body_preview: text.substring(0, 300),
+        });
+      } catch (err) {
+        diag.steps.push({ step: `direct-ip:${config.direct_server_ip}`, error: err instanceof Error ? err.message : String(err) });
+      }
     }
   }
 

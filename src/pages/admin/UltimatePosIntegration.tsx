@@ -11,6 +11,7 @@ import { supabase } from '../../lib/supabase';
 interface UltimatePosConfig {
   id: string;
   api_url: string | null;
+  direct_server_ip: string | null;
   client_id: string | null;
   client_secret: string | null;
   username: string | null;
@@ -109,6 +110,7 @@ export default function UltimatePosIntegration() {
   // Config form state
   const [formData, setFormData] = useState({
     api_url: '',
+    direct_server_ip: '',
     client_id: '',
     client_secret: '',
     username: '',
@@ -163,6 +165,7 @@ export default function UltimatePosIntegration() {
       if (configData) {
         setFormData({
           api_url: configData.api_url || '',
+          direct_server_ip: configData.direct_server_ip || '',
           client_id: configData.client_id || '',
           client_secret: configData.client_secret || '',
           username: configData.username || '',
@@ -649,6 +652,24 @@ export default function UltimatePosIntegration() {
                     placeholder="https://your-store.ultimatepos.com"
                     className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
                   />
+                </div>
+
+                {/* Direct Server IP — bypasses Cloudflare */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                    Direct Server IP <span className="font-normal text-emerald-600">(Cloudflare Bypass)</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.direct_server_ip}
+                    onChange={(e) => setFormData({ ...formData, direct_server_ip: e.target.value })}
+                    placeholder="e.g. 50.6.156.135"
+                    className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                  />
+                  <p className="mt-1 text-xs text-ink-400">
+                    If your site uses Cloudflare, enter your server's direct IP address here to bypass Cloudflare's bot challenge.
+                    The API URL above is still used for the Host header. Leave empty to use the API URL directly.
+                  </p>
                 </div>
 
                 {/* Auth Mode */}
