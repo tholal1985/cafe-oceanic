@@ -30,6 +30,24 @@ interface UltimatePosConfig {
   last_sale_push_at: string | null;
   last_connected_at: string | null;
   connection_status: string;
+  webhook_secret: string | null;
+  webhook_enabled: boolean;
+  sync_product_name: boolean;
+  sync_product_price: boolean;
+  sync_product_category: boolean;
+  sync_product_quantity: boolean;
+  sync_product_weight: boolean;
+  sync_product_images: boolean;
+  sync_product_description: boolean;
+  sync_product_tax_class: boolean;
+  sync_order_status_pending: string;
+  sync_order_status_processing: string;
+  sync_order_status_completed: string;
+  sync_order_status_cancelled: string;
+  sync_order_location_id: number | null;
+  sync_order_order_type: string;
+  last_webhook_at: string | null;
+  last_webhook_event: string | null;
 }
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -299,10 +317,10 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
 
     for (const up of productArray) {
       const ultimateposId = String(up.id);
-      const name = up.name || up.product_name || "Unnamed";
-      const price = parseFloat(up.sell_price || up.price || up.selling_price || "0");
-      const description = up.description || up.product_description || "";
-      const imageUrl = up.image_url || up.image || null;
+      const name = (config.sync_product_name ? (up.name || up.product_name || "Unnamed") : null);
+      const price = config.sync_product_price ? parseFloat(up.sell_price || up.price || up.selling_price || "0") : null;
+      const description = config.sync_product_description ? (up.description || up.product_description || "") : null;
+      const imageUrl = config.sync_product_images ? (up.image_url || up.image || null) : null;
 
       const { data: existing } = await supabase
         .from("products")
@@ -312,10 +330,10 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
 
       if (existing) {
         const updates: any = {};
-        if (existing.name !== name) updates.name = name;
-        if (parseFloat(existing.price) !== price) updates.price = price;
-        if (existing.description !== description) updates.description = description;
-        if (existing.image_url !== imageUrl) updates.image_url = imageUrl;
+        if (name !== null && existing.name !== name) updates.name = name;
+        if (price !== null && parseFloat(existing.price) !== price) updates.price = price;
+        if (description !== null && existing.description !== description) updates.description = description;
+        if (imageUrl !== null && existing.image_url !== imageUrl) updates.image_url = imageUrl;
 
         if (Object.keys(updates).length > 0) {
           await supabase.from("products").update(updates).eq("id", existing.id);
@@ -329,9 +347,9 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
         const { data: newProduct, error } = await supabase
           .from("products")
           .insert({
-            name,
-            description,
-            price,
+            name: name || "Unnamed",
+            description: description || "",
+            price: price || 0,
             image_url: imageUrl,
             ultimatepos_id: ultimateposId,
             is_available: true,
@@ -463,7 +481,7 @@ async function buildSalePayload(supabase: any, orderId: string, config: Ultimate
 
   return {
     business_id: config.business_id,
-    location_id: config.location_id,
+    location_id: config.sync_order_location_id || config.location_id,
     status: "final",
     payment_status: order.payment_status === "paid" ? "paid" : "due",
     final_total: parseFloat(order.total_price),
@@ -472,7 +490,7 @@ async function buildSalePayload(supabase: any, orderId: string, config: Ultimate
     order_number: order.order_number,
     customer_phone: order.phone_number || null,
     sell_lines: lines,
-    order_type: order.order_type || "dine_in",
+    order_type: config.sync_order_order_type || order.order_type || "dine_in",
   };
 }
 
@@ -767,28 +785,75 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
 // Webhook receiver (UltimatePOS → Kiosk)
 // ============================================================
 async function handleWebhook(req: Request, supabase: any): Promise<Response> {
+  const config = await getConfig(supabase);
+
+  if (config && config.webhook_secret) {
+    const providedSecret = req.headers.get("x-webhook-secret") || new URL(req.url).searchParams.get("secret");
+    if (providedSecret !== config.webhook_secret) {
+      return errorResponse(401, "Invalid webhook secret");
+    }
+  }
+
+  if (config && config.webhook_enabled === false) {
+    return jsonResponse({ received: false, message: "Webhooks are disabled" });
+  }
+
   const body = await req.json();
   const eventType = body.event || body.type || "unknown";
   const entityType = body.entity_type || body.resource || "";
   const entityData = body.data || body.entity || body;
+  const entityId = String(entityData.id || entityData.product_id || entityData.contact_id || entityData.order_id || "");
 
-  if (entityType === "product" || eventType.includes("product")) {
-    return handleProductWebhook(supabase, entityData, eventType);
-  } else if (entityType === "contact" || eventType.includes("customer") || eventType.includes("contact")) {
-    return handleCustomerWebhook(supabase, entityData, eventType);
+  let result: Response;
+  let status = "processed";
+  let errorMsg: string | null = null;
+
+  try {
+    if (entityType === "product" || eventType.includes("product")) {
+      result = await handleProductWebhook(supabase, entityData, eventType, config);
+    } else if (entityType === "contact" || eventType.includes("customer") || eventType.includes("contact")) {
+      result = await handleCustomerWebhook(supabase, entityData, eventType, config);
+    } else if (entityType === "order" || eventType.includes("order")) {
+      result = await handleOrderWebhook(supabase, entityData, eventType, config);
+    } else {
+      result = jsonResponse({ received: true, event: eventType, message: "Unhandled event type" });
+      status = "ignored";
+    }
+  } catch (err) {
+    status = "failed";
+    errorMsg = err instanceof Error ? err.message : String(err);
+    result = errorResponse(500, "Webhook processing failed", errorMsg);
   }
 
-  return jsonResponse({ received: true, event: eventType, message: "Unhandled event type" });
+  await supabase.from("ultimatepos_webhook_events").insert({
+    event_type: eventType,
+    entity_type: entityType,
+    entity_id: entityId,
+    status,
+    payload: body,
+    error_message: errorMsg,
+    processed_at: new Date().toISOString(),
+  });
+
+  if (config) {
+    await supabase.from("ultimatepos_config").update({
+      last_webhook_at: new Date().toISOString(),
+      last_webhook_event: eventType,
+    }).eq("id", config.id);
+  }
+
+  return result;
 }
 
-async function handleProductWebhook(supabase: any, data: any, eventType: string): Promise<Response> {
+async function handleProductWebhook(supabase: any, data: any, eventType: string, config: UltimatePosConfig | null): Promise<Response> {
   const ultimateposId = String(data.id || data.product_id || "");
   if (!ultimateposId) return errorResponse(400, "Missing product ID in webhook");
 
-  const name = data.name || data.product_name || "Unnamed";
-  const price = parseFloat(data.sell_price || data.price || "0");
-  const description = data.description || "";
-  const imageUrl = data.image_url || data.image || null;
+  const updates: any = {};
+  if (!config || config.sync_product_name) updates.name = data.name || data.product_name || "Unnamed";
+  if (!config || config.sync_product_price) updates.price = parseFloat(data.sell_price || data.price || "0");
+  if (!config || config.sync_product_description) updates.description = data.description || "";
+  if (!config || config.sync_product_images) updates.image_url = data.image_url || data.image || null;
 
   const { data: existing } = await supabase
     .from("products")
@@ -804,20 +869,52 @@ async function handleProductWebhook(supabase: any, data: any, eventType: string)
   }
 
   if (existing) {
-    await supabase.from("products").update({
-      name, description, price, image_url: imageUrl,
-    }).eq("id", existing.id);
+    await supabase.from("products").update(updates).eq("id", existing.id);
     return jsonResponse({ received: true, action: "updated", ultimatepos_id: ultimateposId, local_id: existing.id });
   } else {
-    const { data: newProduct } = await supabase.from("products").insert({
-      name, description, price, image_url: imageUrl,
-      ultimatepos_id: ultimateposId, is_available: true, display_order: 0,
-    }).select("id").single();
+    const insertData = { ...updates, ultimatepos_id: ultimateposId, is_available: true, display_order: 0 };
+    if (!insertData.name) insertData.name = "Unnamed";
+    if (insertData.price === undefined) insertData.price = 0;
+    const { data: newProduct } = await supabase.from("products").insert(insertData).select("id").single();
     return jsonResponse({ received: true, action: "created", ultimatepos_id: ultimateposId, local_id: newProduct?.id });
   }
 }
 
-async function handleCustomerWebhook(supabase: any, data: any, eventType: string): Promise<Response> {
+async function handleOrderWebhook(supabase: any, data: any, eventType: string, config: UltimatePosConfig | null): Promise<Response> {
+  const ultimateposId = String(data.id || data.order_id || data.sale_id || "");
+  if (!ultimateposId) return errorResponse(400, "Missing order ID in webhook");
+
+  const wooStatus = data.status || data.order_status || "";
+  let mappedStatus = wooStatus;
+  if (config && wooStatus) {
+    if (wooStatus === "pending") mappedStatus = config.sync_order_status_pending;
+    else if (wooStatus === "processing") mappedStatus = config.sync_order_status_processing;
+    else if (wooStatus === "completed") mappedStatus = config.sync_order_status_completed;
+    else if (wooStatus === "cancelled" || wooStatus === "failed" || wooStatus === "refunded") mappedStatus = config.sync_order_status_cancelled;
+  }
+
+  const { data: existing } = await supabase
+    .from("orders")
+    .select("id")
+    .eq("ultimatepos_sale_id", ultimateposId)
+    .maybeSingle();
+
+  if (eventType.includes("delete") || eventType.includes("remove")) {
+    if (existing) {
+      await supabase.from("orders").update({ status: "cancelled" }).eq("id", existing.id);
+    }
+    return jsonResponse({ received: true, action: "cancelled", ultimatepos_id: ultimateposId });
+  }
+
+  if (existing) {
+    await supabase.from("orders").update({ status: mappedStatus }).eq("id", existing.id);
+    return jsonResponse({ received: true, action: "updated", ultimatepos_id: ultimateposId, local_id: existing.id, status: mappedStatus });
+  }
+
+  return jsonResponse({ received: true, action: "ignored", ultimatepos_id: ultimateposId, message: "Order not found locally — only status updates are processed via webhook" });
+}
+
+async function handleCustomerWebhook(supabase: any, data: any, eventType: string, config: UltimatePosConfig | null): Promise<Response> {
   const ultimateposId = String(data.id || data.contact_id || "");
   if (!ultimateposId) return errorResponse(400, "Missing customer ID in webhook");
 
@@ -903,6 +1000,15 @@ Deno.serve(async (req: Request) => {
           : errorResponse(502, "Sale push failed", result.error);
       }
 
+      case "webhook-events": {
+        const { data: events } = await supabase
+          .from("ultimatepos_webhook_events")
+          .select("*")
+          .order("created_at", { ascending: false })
+          .limit(20);
+        return jsonResponse({ events: events || [] });
+      }
+
       case "status": {
         const { data: pendingCount } = await supabase
           .from("ultimatepos_sale_pushes")
@@ -921,17 +1027,20 @@ Deno.serve(async (req: Request) => {
           auto_sync_products: config.auto_sync_products,
           auto_sync_customers: config.auto_sync_customers,
           auto_push_sales: config.auto_push_sales,
+          webhook_enabled: config.webhook_enabled,
           last_product_sync_at: config.last_product_sync_at,
           last_customer_sync_at: config.last_customer_sync_at,
           last_sale_push_at: config.last_sale_push_at,
           last_connected_at: config.last_connected_at,
+          last_webhook_at: config.last_webhook_at,
+          last_webhook_event: config.last_webhook_event,
           pending_sale_pushes: pendingCount || 0,
           recent_sync_logs: recentLogs || [],
         });
       }
 
       default:
-        return errorResponse(404, `Unknown action: ${routeAction}. Available: test-connection, debug, sync-products, sync-customers, push-sales, push-sale, status, webhook`);
+        return errorResponse(404, `Unknown action: ${routeAction}. Available: test-connection, debug, sync-products, sync-customers, push-sales, push-sale, status, webhook, webhook-events`);
     }
   } catch (error) {
     console.error("UltimatePOS sync error:", error);

@@ -3,6 +3,7 @@ import {
   RefreshCw, Link2, Link2Off, AlertCircle,
   Package, Users, ShoppingCart, Settings, Zap, ArrowRight,
   Activity, Server, Eye, EyeOff, Save, RotateCw, Loader2,
+  Webhook, Copy, Check, Bell,
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { supabase } from '../../lib/supabase';
@@ -27,6 +28,24 @@ interface UltimatePosConfig {
   last_sale_push_at: string | null;
   last_connected_at: string | null;
   connection_status: string;
+  webhook_secret: string | null;
+  webhook_enabled: boolean;
+  sync_product_name: boolean;
+  sync_product_price: boolean;
+  sync_product_category: boolean;
+  sync_product_quantity: boolean;
+  sync_product_weight: boolean;
+  sync_product_images: boolean;
+  sync_product_description: boolean;
+  sync_product_tax_class: boolean;
+  sync_order_status_pending: string;
+  sync_order_status_processing: string;
+  sync_order_status_completed: string;
+  sync_order_status_cancelled: string;
+  sync_order_location_id: number | null;
+  sync_order_order_type: string;
+  last_webhook_at: string | null;
+  last_webhook_event: string | null;
 }
 
 interface SyncLog {
@@ -55,6 +74,17 @@ interface SalePush {
   created_at: string;
 }
 
+interface WebhookEvent {
+  id: string;
+  event_type: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  status: string;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+}
+
 type ToastType = { type: 'success' | 'error' | 'info'; text: string } | null;
 
 const FUNCTION_URL = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ultimatepos-sync`;
@@ -65,12 +95,14 @@ export default function UltimatePosIntegration() {
   const [salePushes, setSalePushes] = useState<SalePush[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'logs' | 'queue'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'config' | 'webhooks' | 'product-sync' | 'order-sync' | 'logs' | 'queue'>('dashboard');
   const [showSecrets, setShowSecrets] = useState(false);
   const [testing, setTesting] = useState(false);
   const [syncing, setSyncing] = useState<string | null>(null);
   const [toast, setToast] = useState<ToastType>(null);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  const [webhookEvents, setWebhookEvents] = useState<WebhookEvent[]>([]);
+  const [copiedField, setCopiedField] = useState<string | null>(null);
   const [debugInfo, setDebugInfo] = useState<any>(null);
   const [debugging, setDebugging] = useState(false);
 
@@ -89,6 +121,22 @@ export default function UltimatePosIntegration() {
     auto_sync_products: false,
     auto_sync_customers: false,
     auto_push_sales: true,
+    webhook_secret: '',
+    webhook_enabled: false,
+    sync_product_name: true,
+    sync_product_price: true,
+    sync_product_category: false,
+    sync_product_quantity: false,
+    sync_product_weight: false,
+    sync_product_images: true,
+    sync_product_description: true,
+    sync_product_tax_class: false,
+    sync_order_status_pending: 'pending',
+    sync_order_status_processing: 'confirmed',
+    sync_order_status_completed: 'completed',
+    sync_order_status_cancelled: 'cancelled',
+    sync_order_location_id: null as number | null,
+    sync_order_order_type: 'dine_in',
   });
 
   const showToast = (type: 'success' | 'error' | 'info', text: string) => {
@@ -99,16 +147,18 @@ export default function UltimatePosIntegration() {
   const loadData = useCallback(async () => {
     setLoading(true);
     try {
-      const [configRes, logsRes, pushesRes] = await Promise.all([
+      const [configRes, logsRes, pushesRes, webhookRes] = await Promise.all([
         supabase.from('ultimatepos_config').select('*').maybeSingle(),
         supabase.from('ultimatepos_sync_logs').select('*').order('created_at', { ascending: false }).limit(20),
         supabase.from('ultimatepos_sale_pushes').select('*').order('created_at', { ascending: false }).limit(20),
+        supabase.from('ultimatepos_webhook_events').select('*').order('created_at', { ascending: false }).limit(20),
       ]);
 
       const configData = configRes.data as UltimatePosConfig | null;
       setConfig(configData);
       setSyncLogs(logsRes.data || []);
       setSalePushes(pushesRes.data || []);
+      setWebhookEvents(webhookRes.data || []);
 
       if (configData) {
         setFormData({
@@ -125,6 +175,22 @@ export default function UltimatePosIntegration() {
           auto_sync_products: configData.auto_sync_products,
           auto_sync_customers: configData.auto_sync_customers,
           auto_push_sales: configData.auto_push_sales,
+          webhook_secret: configData.webhook_secret || '',
+          webhook_enabled: configData.webhook_enabled,
+          sync_product_name: configData.sync_product_name,
+          sync_product_price: configData.sync_product_price,
+          sync_product_category: configData.sync_product_category,
+          sync_product_quantity: configData.sync_product_quantity,
+          sync_product_weight: configData.sync_product_weight,
+          sync_product_images: configData.sync_product_images,
+          sync_product_description: configData.sync_product_description,
+          sync_product_tax_class: configData.sync_product_tax_class,
+          sync_order_status_pending: configData.sync_order_status_pending,
+          sync_order_status_processing: configData.sync_order_status_processing,
+          sync_order_status_completed: configData.sync_order_status_completed,
+          sync_order_status_cancelled: configData.sync_order_status_cancelled,
+          sync_order_location_id: configData.sync_order_location_id,
+          sync_order_order_type: configData.sync_order_order_type,
         });
       }
     } catch {
@@ -239,6 +305,21 @@ export default function UltimatePosIntegration() {
     }
   };
 
+  const copyToClipboard = (text: string, field: string) => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
+  };
+
+  const generateWebhookSecret = () => {
+    const bytes = new Uint8Array(24);
+    crypto.getRandomValues(bytes);
+    const secret = 'whsec_' + Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+    setFormData({ ...formData, webhook_secret: secret });
+  };
+
+  const webhookBaseUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/ultimatepos-sync?action=webhook`;
+
   const formatDate = (dateStr: string | null) => {
     if (!dateStr) return 'Never';
     return new Date(dateStr).toLocaleString();
@@ -320,10 +401,13 @@ export default function UltimatePosIntegration() {
       </div>
 
       {/* Tabs */}
-      <div className="mb-6 flex gap-1 rounded-xl bg-white p-1 shadow-soft ring-1 ring-ink-100">
+      <div className="mb-6 flex flex-wrap gap-1 rounded-xl bg-white p-1 shadow-soft ring-1 ring-ink-100">
         {[
           { key: 'dashboard', label: 'Dashboard', icon: Server },
           { key: 'config', label: 'Configuration', icon: Settings },
+          { key: 'product-sync', label: 'Product Sync', icon: Package },
+          { key: 'order-sync', label: 'Order Sync', icon: ShoppingCart },
+          { key: 'webhooks', label: 'Webhooks', icon: Webhook },
           { key: 'logs', label: 'Sync History', icon: Activity },
           { key: 'queue', label: 'Sale Push Queue', icon: ShoppingCart },
         ].map((tab) => {
@@ -332,7 +416,7 @@ export default function UltimatePosIntegration() {
             <button
               key={tab.key}
               onClick={() => setActiveTab(tab.key as any)}
-              className={`flex items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all ${
+              className={`flex items-center gap-2 rounded-lg px-3 py-2.5 text-sm font-medium transition-all ${
                 activeTab === tab.key
                   ? 'bg-ocean-900 text-white shadow-lifted'
                   : 'text-ink-500 hover:bg-ink-50 hover:text-ink-800'
@@ -734,6 +818,306 @@ export default function UltimatePosIntegration() {
                     Test
                   </button>
                 </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Product Sync Tab */}
+        {activeTab === 'product-sync' && (
+          <motion.div key="product-sync" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+            <div className="rounded-3xl border border-ink-100 bg-white p-6 shadow-soft">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-50 text-ocean-700">
+                  <Package className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-display text-base font-semibold text-ink-900">Product Sync Fields</h3>
+                  <p className="text-xs text-ink-500">Choose which product fields are synced from UltimatePOS into your kiosk.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                {[
+                  { key: 'sync_product_name', label: 'Product Name', desc: 'Sync the product name' },
+                  { key: 'sync_product_price', label: 'Price', desc: 'Sync the selling price' },
+                  { key: 'sync_product_category', label: 'Category', desc: 'Sync product categories' },
+                  { key: 'sync_product_quantity', label: 'Quantity / Stock', desc: 'Sync stock quantities' },
+                  { key: 'sync_product_weight', label: 'Weight', desc: 'Sync product weight' },
+                  { key: 'sync_product_images', label: 'Images', desc: 'Sync product images' },
+                  { key: 'sync_product_description', label: 'Description', desc: 'Sync product descriptions' },
+                  { key: 'sync_product_tax_class', label: 'Tax Class', desc: 'Sync tax class assignments' },
+                ].map((field) => (
+                  <label key={field.key} className="flex cursor-pointer items-center justify-between rounded-xl border border-ink-100 bg-ivory-50 px-4 py-3 transition hover:bg-ivory-100">
+                    <div>
+                      <p className="text-sm font-medium text-ink-700">{field.label}</p>
+                      <p className="text-xs text-ink-400">{field.desc}</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={(formData as any)[field.key]}
+                      onChange={(e) => setFormData({ ...formData, [field.key]: e.target.checked })}
+                      className="h-5 w-9 cursor-pointer appearance-none rounded-full bg-ink-200 transition-colors checked:bg-ocean-600 relative after:absolute after:top-0.5 after:left-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform checked:after:translate-x-4"
+                    />
+                  </label>
+                ))}
+              </div>
+              <div className="mt-6 flex items-center justify-between">
+                <p className="text-xs text-ink-400">Changes are saved when you click Save Configuration.</p>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => handleSync('products')}
+                    disabled={!!syncing || !config}
+                    className="flex items-center gap-2 rounded-full bg-ocean-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ocean-900 disabled:opacity-50"
+                  >
+                    {syncing === 'products' ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                    Sync Now
+                  </button>
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={saving}
+                    className="flex items-center gap-2 rounded-full border border-ocean-200 px-4 py-2.5 text-sm font-semibold text-ocean-700 transition hover:bg-ocean-50 disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save Configuration
+                  </button>
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Order Sync Tab */}
+        {activeTab === 'order-sync' && (
+          <motion.div key="order-sync" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+            <div className="rounded-3xl border border-ink-100 bg-white p-6 shadow-soft">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-50 text-ocean-700">
+                  <ShoppingCart className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="font-display text-base font-semibold text-ink-900">Order Status Mapping</h3>
+                  <p className="text-xs text-ink-500">Map WooCommerce/UltimatePOS order statuses to your kiosk order statuses.</p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">WooCommerce: Pending</label>
+                  <input
+                    type="text"
+                    value={formData.sync_order_status_pending}
+                    onChange={(e) => setFormData({ ...formData, sync_order_status_pending: e.target.value })}
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">WooCommerce: Processing</label>
+                  <input
+                    type="text"
+                    value={formData.sync_order_status_processing}
+                    onChange={(e) => setFormData({ ...formData, sync_order_status_processing: e.target.value })}
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">WooCommerce: Completed</label>
+                  <input
+                    type="text"
+                    value={formData.sync_order_status_completed}
+                    onChange={(e) => setFormData({ ...formData, sync_order_status_completed: e.target.value })}
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">WooCommerce: Cancelled</label>
+                  <input
+                    type="text"
+                    value={formData.sync_order_status_cancelled}
+                    onChange={(e) => setFormData({ ...formData, sync_order_status_cancelled: e.target.value })}
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  />
+                </div>
+              </div>
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">Sync Order Location ID</label>
+                  <input
+                    type="number"
+                    value={formData.sync_order_location_id ?? ''}
+                    onChange={(e) => setFormData({ ...formData, sync_order_location_id: e.target.value ? parseInt(e.target.value) : null })}
+                    placeholder="Use default location"
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">Sync Order Type</label>
+                  <select
+                    value={formData.sync_order_order_type}
+                    onChange={(e) => setFormData({ ...formData, sync_order_order_type: e.target.value })}
+                    className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 text-sm text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                  >
+                    <option value="dine_in">Dine In</option>
+                    <option value="takeaway">Takeaway</option>
+                    <option value="delivery">Delivery</option>
+                  </select>
+                </div>
+              </div>
+              <div className="mt-6 flex items-center justify-end gap-3">
+                <button
+                  onClick={handleSaveConfig}
+                  disabled={saving}
+                  className="flex items-center gap-2 rounded-full bg-ocean-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ocean-900 disabled:opacity-50"
+                >
+                  {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                  Save Configuration
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        {/* Webhooks Tab */}
+        {activeTab === 'webhooks' && (
+          <motion.div key="webhooks" initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+            <div className="space-y-4">
+              {/* Webhook Settings */}
+              <div className="rounded-3xl border border-ink-100 bg-white p-6 shadow-soft">
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-50 text-ocean-700">
+                      <Webhook className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <h3 className="font-display text-base font-semibold text-ink-900">Webhook Settings</h3>
+                      <p className="text-xs text-ink-500">Configure incoming webhooks from UltimatePOS / WooCommerce.</p>
+                    </div>
+                  </div>
+                  <label className="flex cursor-pointer items-center gap-2">
+                    <span className="text-sm font-medium text-ink-600">{formData.webhook_enabled ? 'Enabled' : 'Disabled'}</span>
+                    <input
+                      type="checkbox"
+                      checked={formData.webhook_enabled}
+                      onChange={(e) => setFormData({ ...formData, webhook_enabled: e.target.checked })}
+                      className="h-5 w-9 cursor-pointer appearance-none rounded-full bg-ink-200 transition-colors checked:bg-ocean-600 relative after:absolute after:top-0.5 after:left-0.5 after:h-4 after:w-4 after:rounded-full after:bg-white after:transition-transform checked:after:translate-x-4"
+                    />
+                  </label>
+                </div>
+
+                {/* Webhook Secret */}
+                <div className="mb-4">
+                  <label className="mb-1 block text-xs font-semibold uppercase tracking-wider text-ink-400">Webhook Secret</label>
+                  <div className="flex gap-2">
+                    <div className="relative flex-1">
+                      <input
+                        type={showSecrets ? 'text' : 'password'}
+                        value={formData.webhook_secret}
+                        onChange={(e) => setFormData({ ...formData, webhook_secret: e.target.value })}
+                        placeholder="Generate a secret to secure your webhooks"
+                        className="w-full rounded-xl border border-ink-200 bg-white px-4 py-2.5 pr-10 text-sm font-mono text-ink-800 focus:border-ocean-500 focus:outline-none focus:ring-1 focus:ring-ocean-500"
+                      />
+                      <button
+                        onClick={() => setShowSecrets(!showSecrets)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-600"
+                      >
+                        {showSecrets ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                    <button
+                      onClick={generateWebhookSecret}
+                      className="flex items-center gap-2 rounded-xl border border-ocean-200 px-4 py-2.5 text-sm font-semibold text-ocean-700 transition hover:bg-ocean-50"
+                    >
+                      <Zap className="h-4 w-4" />
+                      Generate
+                    </button>
+                  </div>
+                  <p className="mt-1 text-xs text-ink-400">Include this secret in the <code className="rounded bg-ivory-100 px-1 font-mono text-ocean-800">X-Webhook-Secret</code> header when sending webhooks to verify authenticity.</p>
+                </div>
+
+                {/* Webhook Delivery URLs */}
+                <div className="mb-4">
+                  <label className="mb-2 block text-xs font-semibold uppercase tracking-wider text-ink-400">Webhook Delivery URL</label>
+                  <div className="space-y-2">
+                    {[
+                      { event: 'Order Created / Updated / Deleted', url: webhookBaseUrl },
+                      { event: 'Product Created / Updated / Deleted', url: webhookBaseUrl },
+                      { event: 'Customer Created / Updated / Deleted', url: webhookBaseUrl },
+                    ].map((item) => (
+                      <div key={item.event} className="flex items-center gap-2 rounded-xl border border-ink-100 bg-ivory-50 px-4 py-3">
+                        <div className="flex-1">
+                          <p className="text-xs font-semibold text-ink-600">{item.event}</p>
+                          <p className="font-mono text-xs text-ink-500 break-all">{item.url}</p>
+                        </div>
+                        <button
+                          onClick={() => copyToClipboard(item.url, item.event)}
+                          className="flex-shrink-0 rounded-lg border border-ink-200 p-2 text-ink-500 transition hover:bg-white hover:text-ocean-700"
+                        >
+                          {copiedField === item.event ? <Check className="h-4 w-4 text-emerald-600" /> : <Copy className="h-4 w-4" />}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-end gap-3">
+                  <button
+                    onClick={handleSaveConfig}
+                    disabled={saving}
+                    className="flex items-center gap-2 rounded-full bg-ocean-800 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ocean-900 disabled:opacity-50"
+                  >
+                    {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                    Save Configuration
+                  </button>
+                </div>
+              </div>
+
+              {/* Recent Webhook Events */}
+              <div className="rounded-3xl border border-ink-100 bg-white p-6 shadow-soft">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-ocean-50 text-ocean-700">
+                    <Bell className="h-5 w-5" />
+                  </div>
+                  <div>
+                    <h3 className="font-display text-base font-semibold text-ink-900">Recent Webhook Events</h3>
+                    <p className="text-xs text-ink-500">Last webhook received: {formatDate(config?.last_webhook_at || null)}{config?.last_webhook_event ? ` (${config.last_webhook_event})` : ''}</p>
+                  </div>
+                </div>
+                {webhookEvents.length === 0 ? (
+                  <div className="flex flex-col items-center gap-2 py-8 text-center">
+                    <div className="flex h-10 w-10 items-center justify-center rounded-full bg-ivory-100 text-ink-400">
+                      <Webhook className="h-5 w-5" />
+                    </div>
+                    <p className="text-sm font-medium text-ink-700">No webhook events yet</p>
+                    <p className="text-xs text-ink-400">Webhook events will appear here once UltimatePOS starts sending them.</p>
+                  </div>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead className="border-b border-ink-100">
+                        <tr>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Event</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Entity</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Status</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">Error</th>
+                          <th className="px-3 py-2 text-left text-[10px] font-semibold uppercase tracking-wider text-ink-400">When</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-ink-50">
+                        {webhookEvents.map((ev) => (
+                          <tr key={ev.id} className="hover:bg-ivory-50">
+                            <td className="px-3 py-2 text-xs font-medium text-ink-700">{ev.event_type}</td>
+                            <td className="px-3 py-2 text-xs text-ink-500">{ev.entity_type || '—'}</td>
+                            <td className="px-3 py-2">
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ring-1 ring-inset ${getStatusBg(ev.status)}`}>
+                                {ev.status}
+                              </span>
+                            </td>
+                            <td className="max-w-[200px] truncate px-3 py-2 text-xs text-rose-500" title={ev.error_message || ''}>{ev.error_message || '—'}</td>
+                            <td className="px-3 py-2 text-xs text-ink-400">{formatDate(ev.created_at)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             </div>
           </motion.div>
