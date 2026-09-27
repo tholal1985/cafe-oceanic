@@ -30,6 +30,15 @@ interface TokenCache {
 
 let tokenCache: TokenCache | null = null;
 
+// Cloudflare blocks requests without a browser-like User-Agent, returning a
+// 403 "Just a moment..." JS challenge page instead of the real API response.
+// These headers make our server-side fetch look like a normal HTTP client.
+const UPOS_HEADERS: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (compatible; UltimatePOS-Connector/1.0)",
+  "Accept": "application/json",
+  "Accept-Language": "en-US,en;q=0.9",
+};
+
 // ── Auth ─────────────────────────────────────────────────────────────────────
 
 async function getBearerToken(config: UltimatePOSConfig): Promise<string> {
@@ -44,7 +53,7 @@ async function getBearerToken(config: UltimatePOSConfig): Promise<string> {
     if (tokenCache && Date.now() < tokenCache.expires_at - 60000) return tokenCache.token;
     const resp = await fetch(`${baseUrl}/oauth/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+      headers: { ...UPOS_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({
         grant_type: "password",
         client_id: config.client_id,
@@ -73,13 +82,13 @@ async function getBearerToken(config: UltimatePOSConfig): Promise<string> {
   });
   let resp = await fetch(`${baseUrl}/oauth/token`, {
     method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+    headers: { ...UPOS_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
     body: formBody.toString(),
   });
   if (!resp.ok && resp.status >= 400 && resp.status < 500) {
     resp = await fetch(`${baseUrl}/oauth/token`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", "Accept": "application/json" },
+      headers: { ...UPOS_HEADERS, "Content-Type": "application/json" },
       body: JSON.stringify({ grant_type: "client_credentials", client_id: config.client_id, client_secret: config.client_secret }),
     });
   }
@@ -103,7 +112,7 @@ async function uposRequest(
   const url = `${config.base_url.replace(/\/$/, "")}${path}`;
   const resp = await fetch(url, {
     method,
-    headers: { "Authorization": `Bearer ${token}`, "Content-Type": "application/json", "Accept": "application/json" },
+    headers: { ...UPOS_HEADERS, "Authorization": `Bearer ${token}`, "Content-Type": "application/json" },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await resp.text();
@@ -118,7 +127,7 @@ async function verifyToken(config: UltimatePOSConfig, token: string): Promise<vo
   const candidates = ["/connector/api/business_details", "/api/business_details", "/connector/api/location"];
   for (const path of candidates) {
     const r = await fetch(`${baseUrl}${path}`, {
-      headers: { "Authorization": `Bearer ${token}`, "Accept": "application/json" },
+      headers: { ...UPOS_HEADERS, "Authorization": `Bearer ${token}` },
     });
     if (r.status !== 404) {
       if (!r.ok) {
