@@ -92,25 +92,49 @@ function jsonError(status: number, error: string, details?: string): Response {
 // ============================================================
 // Token Management
 // ============================================================
+
+// Browser-like headers to pass Cloudflare bot protection on UltimatePOS
+const browserHeaders: Record<string, string> = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+  "Accept": "application/json, text/plain, */*",
+  "Accept-Language": "en-US,en;q=0.9",
+  "Accept-Encoding": "gzip, deflate, br",
+};
+
+function buildFormData(params: Record<string, string>): string {
+  return Object.entries(params)
+    .map(([k, v]) => encodeURIComponent(k) + "=" + encodeURIComponent(v))
+    .join("&");
+}
+
 async function getAccessToken(config: UltimatePosConfig): Promise<string> {
   const tokenUrl = `${config.api_url.replace(/\/$/, "")}/oauth/token`;
 
+  const formData = buildFormData({
+    grant_type: "password",
+    client_id: config.client_id,
+    client_secret: config.client_secret,
+    username: config.username,
+    password: config.password,
+    scope: "*",
+  });
+
   const tokenResponse = await fetch(tokenUrl, {
     method: "POST",
-    headers: { "Content-Type": "application/json", "Accept": "application/json" },
-    body: JSON.stringify({
-      grant_type: "password",
-      client_id: config.client_id,
-      client_secret: config.client_secret,
-      username: config.username,
-      password: config.password,
-      scope: "*",
-    }),
+    headers: {
+      ...browserHeaders,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body: formData,
   });
 
   if (!tokenResponse.ok) {
     const errText = await tokenResponse.text();
     console.error("UltimatePOS token error:", tokenResponse.status, errText);
+    const isCloudflare = errText.includes("Just a moment") || errText.includes("cloudflare") || errText.includes("cf-browser");
+    if (isCloudflare) {
+      throw new Error(`UltimatePOS is behind Cloudflare bot protection which is blocking the server-side request. Please whitelist the Supabase edge function IPs in your UltimatePOS Cloudflare settings, or contact UltimatePOS support to allow API access from server environments.`);
+    }
     throw new Error(`Authentication failed (${tokenResponse.status}): ${errText.substring(0, 300)}`);
   }
 
@@ -134,8 +158,8 @@ async function posApiGet(config: UltimatePosConfig, token: string, endpoint: str
   const response = await fetch(url.toString(), {
     method: "GET",
     headers: {
+      ...browserHeaders,
       "Authorization": `Bearer ${token}`,
-      "Accept": "application/json",
     },
   });
 
@@ -154,9 +178,9 @@ async function posApiPost(config: UltimatePosConfig, token: string, endpoint: st
   const response = await fetch(url, {
     method: "POST",
     headers: {
+      ...browserHeaders,
       "Authorization": `Bearer ${token}`,
       "Content-Type": "application/json",
-      "Accept": "application/json",
     },
     body: JSON.stringify(payload),
   });
