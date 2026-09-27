@@ -33,3 +33,6 @@ verify_jwt = true
 
 [functions.rest-api]
 verify_jwt = false
+
+[functions.ultimatepos-sync]
+verify_jwt = true
