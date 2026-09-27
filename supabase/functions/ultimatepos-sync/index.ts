@@ -16,6 +16,8 @@ interface UltimatePosConfig {
   password: string;
   is_active: boolean;
   auto_push_sales: boolean;
+  auth_mode: string;
+  personal_access_token: string | null;
 }
 
 interface SyncRequest {
@@ -108,6 +110,15 @@ function buildFormData(params: Record<string, string>): string {
 }
 
 async function getAccessToken(config: UltimatePosConfig): Promise<string> {
+  // PAT mode: use the pre-generated token directly, skip the OAuth endpoint
+  if (config.auth_mode === "pat") {
+    if (!config.personal_access_token) {
+      throw new Error("Personal Access Token mode is selected but no token was provided. Generate a token from UltimatePOS > your profile > Personal Access Tokens and paste it in the settings.");
+    }
+    return config.personal_access_token;
+  }
+
+  // OAuth password grant mode
   const tokenUrl = `${config.api_url.replace(/\/$/, "")}/oauth/token`;
 
   const formData = buildFormData({
@@ -133,7 +144,7 @@ async function getAccessToken(config: UltimatePosConfig): Promise<string> {
     console.error("UltimatePOS token error:", tokenResponse.status, errText);
     const isCloudflare = errText.includes("Just a moment") || errText.includes("cloudflare") || errText.includes("cf-browser");
     if (isCloudflare) {
-      throw new Error(`UltimatePOS is behind Cloudflare bot protection which is blocking the server-side request. Please whitelist the Supabase edge function IPs in your UltimatePOS Cloudflare settings, or contact UltimatePOS support to allow API access from server environments.`);
+      throw new Error(`Cloudflare bot protection is blocking the OAuth request. Switch to Personal Access Token mode in the settings — generate a token from your browser (which passes Cloudflare) and paste it in. This bypasses the OAuth endpoint entirely.`);
     }
     throw new Error(`Authentication failed (${tokenResponse.status}): ${errText.substring(0, 300)}`);
   }

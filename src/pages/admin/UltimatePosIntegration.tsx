@@ -17,6 +17,8 @@ interface UltimatePosConfig {
   auto_sync_products: boolean;
   auto_sync_customers: boolean;
   auto_push_sales: boolean;
+  auth_mode: string;
+  personal_access_token: string | null;
   last_product_sync_at: string | null;
   last_customer_sync_at: string | null;
   last_sale_push_at: string | null;
@@ -60,8 +62,10 @@ export default function UltimatePosIntegration() {
     auto_sync_products: false,
     auto_sync_customers: false,
     auto_push_sales: true,
+    auth_mode: 'oauth' as 'oauth' | 'pat',
+    personal_access_token: '',
   });
-  const [showSecrets, setShowSecrets] = useState({ client_secret: false, password: false });
+  const [showSecrets, setShowSecrets] = useState({ client_secret: false, password: false, pat: false });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(false);
@@ -99,6 +103,8 @@ export default function UltimatePosIntegration() {
           auto_sync_products: configData.auto_sync_products ?? false,
           auto_sync_customers: configData.auto_sync_customers ?? false,
           auto_push_sales: configData.auto_push_sales ?? true,
+          auth_mode: (configData.auth_mode as 'oauth' | 'pat') || 'oauth',
+          personal_access_token: configData.personal_access_token || '',
         });
       }
 
@@ -142,45 +148,47 @@ export default function UltimatePosIntegration() {
   };
 
   const handleSave = async () => {
-    if (!form.api_url || !form.client_id || !form.client_secret || !form.username || !form.password) {
-      showToast('error', 'Please fill in all connection fields');
+    if (!form.api_url) {
+      showToast('error', 'Please enter your UltimatePOS API URL');
+      return;
+    }
+    if (form.auth_mode === 'oauth' && (!form.client_id || !form.client_secret || !form.username || !form.password)) {
+      showToast('error', 'Please fill in all OAuth connection fields (Client ID, Client Secret, Username, Password)');
+      return;
+    }
+    if (form.auth_mode === 'pat' && !form.personal_access_token) {
+      showToast('error', 'Please enter your Personal Access Token');
       return;
     }
 
     setSaving(true);
     try {
+      const saveData = {
+        api_url: form.api_url,
+        client_id: form.client_id,
+        client_secret: form.client_secret,
+        username: form.username,
+        password: form.password,
+        is_active: form.is_active,
+        auto_sync_products: form.auto_sync_products,
+        auto_sync_customers: form.auto_sync_customers,
+        auto_push_sales: form.auto_push_sales,
+        auth_mode: form.auth_mode,
+        personal_access_token: form.auth_mode === 'pat' ? form.personal_access_token : null,
+        updated_at: new Date().toISOString(),
+      };
+
       if (config) {
         const { error } = await supabase
           .from('ultimatepos_config')
-          .update({
-            api_url: form.api_url,
-            client_id: form.client_id,
-            client_secret: form.client_secret,
-            username: form.username,
-            password: form.password,
-            is_active: form.is_active,
-            auto_sync_products: form.auto_sync_products,
-            auto_sync_customers: form.auto_sync_customers,
-            auto_push_sales: form.auto_push_sales,
-            updated_at: new Date().toISOString(),
-          })
+          .update(saveData)
           .eq('id', config.id);
 
         if (error) throw error;
       } else {
         const { error } = await supabase
           .from('ultimatepos_config')
-          .insert({
-            api_url: form.api_url,
-            client_id: form.client_id,
-            client_secret: form.client_secret,
-            username: form.username,
-            password: form.password,
-            is_active: form.is_active,
-            auto_sync_products: form.auto_sync_products,
-            auto_sync_customers: form.auto_sync_customers,
-            auto_push_sales: form.auto_push_sales,
-          });
+          .insert(saveData);
 
         if (error) throw error;
       }
@@ -404,75 +412,149 @@ export default function UltimatePosIntegration() {
                     <p className="mt-1 text-xs text-ink-400">The base URL of your UltimatePOS installation</p>
                   </div>
 
-                  <div>
+                  {/* Auth Mode Selector */}
+                  <div className="md:col-span-2">
                     <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
-                      Client ID
+                      Authentication Method
                     </label>
-                    <input
-                      type="text"
-                      value={form.client_id}
-                      onChange={(e) => setForm({ ...form, client_id: e.target.value })}
-                      placeholder="Enter Client ID"
-                      className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
-                      Client Secret
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showSecrets.client_secret ? 'text' : 'password'}
-                        value={form.client_secret}
-                        onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
-                        placeholder="Enter Client Secret"
-                        className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-11 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
-                      />
+                    <div className="flex gap-3">
                       <button
                         type="button"
-                        onClick={() => setShowSecrets({ ...showSecrets, client_secret: !showSecrets.client_secret })}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                        onClick={() => setForm({ ...form, auth_mode: 'oauth' })}
+                        className={`flex-1 rounded-lg border px-4 py-3 text-left transition-all ${
+                          form.auth_mode === 'oauth'
+                            ? 'border-ocean-500 bg-ocean-50 ring-2 ring-ocean-200'
+                            : 'border-ink-200 bg-white hover:bg-ink-50'
+                        }`}
                       >
-                        {showSecrets.client_secret ? <EyeOff size={16} /> : <Eye size={16} />}
+                        <div className="flex items-center gap-2">
+                          <div className={`h-4 w-4 rounded-full border-2 ${form.auth_mode === 'oauth' ? 'border-ocean-600 bg-ocean-600' : 'border-ink-300'}`} />
+                          <span className="text-sm font-semibold text-ink-800">OAuth (Password Grant)</span>
+                        </div>
+                        <p className="mt-1 text-xs text-ink-500">Use Client ID, Secret, username & password. May be blocked by Cloudflare.</p>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setForm({ ...form, auth_mode: 'pat' })}
+                        className={`flex-1 rounded-lg border px-4 py-3 text-left transition-all ${
+                          form.auth_mode === 'pat'
+                            ? 'border-emerald-500 bg-emerald-50 ring-2 ring-emerald-200'
+                            : 'border-ink-200 bg-white hover:bg-ink-50'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <div className={`h-4 w-4 rounded-full border-2 ${form.auth_mode === 'pat' ? 'border-emerald-600 bg-emerald-600' : 'border-ink-300'}`} />
+                          <span className="text-sm font-semibold text-ink-800">Personal Access Token</span>
+                        </div>
+                        <p className="mt-1 text-xs text-ink-500">Bypasses Cloudflare. Generate a token from your browser.</p>
                       </button>
                     </div>
                   </div>
 
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
-                      Username
-                    </label>
-                    <input
-                      type="text"
-                      value={form.username}
-                      onChange={(e) => setForm({ ...form, username: e.target.value })}
-                      placeholder="UltimatePOS admin username"
-                      className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
-                      Password
-                    </label>
-                    <div className="relative">
-                      <input
-                        type={showSecrets.password ? 'text' : 'password'}
-                        value={form.password}
-                        onChange={(e) => setForm({ ...form, password: e.target.value })}
-                        placeholder="UltimatePOS admin password"
-                        className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-11 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setShowSecrets({ ...showSecrets, password: !showSecrets.password })}
-                        className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
-                      >
-                        {showSecrets.password ? <EyeOff size={16} /> : <Eye size={16} />}
-                      </button>
+                  {form.auth_mode === 'pat' && (
+                    <div className="md:col-span-2">
+                      <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                        Personal Access Token
+                      </label>
+                      <div className="relative">
+                        <input
+                          type={showSecrets.pat ? 'text' : 'password'}
+                          value={form.personal_access_token}
+                          onChange={(e) => setForm({ ...form, personal_access_token: e.target.value })}
+                          placeholder="Paste your Personal Access Token here"
+                          className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-11 text-sm text-ink-900 outline-none transition-colors focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-200"
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setShowSecrets({ ...showSecrets, pat: !showSecrets.pat })}
+                          className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                        >
+                          {showSecrets.pat ? <EyeOff size={16} /> : <Eye size={16} />}
+                        </button>
+                      </div>
+                      <div className="mt-2 rounded-lg bg-emerald-50 p-3 ring-1 ring-emerald-200">
+                        <p className="text-xs text-emerald-800">
+                          <strong>How to get a token:</strong> Log in to your UltimatePOS from your browser (this passes Cloudflare).
+                          Go to your profile page, find "Personal Access Tokens", generate a new token, copy it, and paste it here.
+                          This bypasses the Cloudflare-protected OAuth endpoint entirely.
+                        </p>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {form.auth_mode === 'oauth' && (
+                    <>
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                          Client ID
+                        </label>
+                        <input
+                          type="text"
+                          value={form.client_id}
+                          onChange={(e) => setForm({ ...form, client_id: e.target.value })}
+                          placeholder="Enter Client ID"
+                          className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                          Client Secret
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showSecrets.client_secret ? 'text' : 'password'}
+                            value={form.client_secret}
+                            onChange={(e) => setForm({ ...form, client_secret: e.target.value })}
+                            placeholder="Enter Client Secret"
+                            className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-11 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, client_secret: !showSecrets.client_secret })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                          >
+                            {showSecrets.client_secret ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                          Username
+                        </label>
+                        <input
+                          type="text"
+                          value={form.username}
+                          onChange={(e) => setForm({ ...form, username: e.target.value })}
+                          placeholder="UltimatePOS admin username"
+                          className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">
+                          Password
+                        </label>
+                        <div className="relative">
+                          <input
+                            type={showSecrets.password ? 'text' : 'password'}
+                            value={form.password}
+                            onChange={(e) => setForm({ ...form, password: e.target.value })}
+                            placeholder="UltimatePOS admin password"
+                            className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 pr-11 text-sm text-ink-900 outline-none transition-colors focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => setShowSecrets({ ...showSecrets, password: !showSecrets.password })}
+                            className="absolute right-3 top-1/2 -translate-y-1/2 text-ink-400 hover:text-ink-700"
+                          >
+                            {showSecrets.password ? <EyeOff size={16} /> : <Eye size={16} />}
+                          </button>
+                        </div>
+                      </div>
+                    </>
+                  )}
                 </div>
 
                 <div className="mt-6 space-y-3 rounded-xl bg-ivory-50 p-5 ring-1 ring-ink-100">
