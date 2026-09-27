@@ -1,6 +1,3 @@
-[functions.api]
-verify_jwt = true
-
 [functions.create-backup]
 verify_jwt = true
 
@@ -29,9 +26,6 @@ verify_jwt = true
 verify_jwt = true
 
 [functions.send-whatsapp]
-verify_jwt = true
-
-[functions.ultimatepos-proxy]
 verify_jwt = true
 
 [functions.verify-payment]
