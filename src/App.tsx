@@ -30,7 +30,7 @@ import ProductPackLicenses from './pages/admin/ProductPackLicenses';
 import ActivationKeys from './pages/admin/ActivationKeys';
 import PackTiers from './pages/admin/PackTiers';
 import CustomerBilling from './pages/admin/CustomerBilling';
-
+import UltimatePOSIntegration from './pages/admin/UltimatePOSIntegration';
 
 import CustomerLogin from './pages/customer/CustomerLogin';
 import CustomerRegister from './pages/customer/CustomerRegister';
@@ -74,7 +74,7 @@ function App() {
             <Route path="pack-licenses" element={<ProductPackLicenses />} />
             <Route path="pack-tiers" element={<PackTiers />} />
             <Route path="activation-keys" element={<ActivationKeys />} />
-
+            <Route path="ultimatepos" element={<UltimatePOSIntegration />} />
           </Route>
         </Routes>
       </IdleTimer>

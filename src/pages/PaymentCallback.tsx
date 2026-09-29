@@ -5,6 +5,7 @@ import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { PaymentService } from '../lib/paymentService';
 import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
+import { pushOrderToUltimatePOS } from '../lib/ultimatePosService';
 
 export default function PaymentCallback() {
   const navigate = useNavigate();
@@ -65,6 +66,7 @@ export default function PaymentCallback() {
           setStatus('success');
           setOrderNumber(order.order_number);
           clearCart();
+          pushOrderToUltimatePOS(orderId);
 
           setTimeout(() => {
             navigate('/order-confirmation', {
@@ -89,6 +91,7 @@ export default function PaymentCallback() {
           setStatus('success');
           setOrderNumber(order.order_number);
           clearCart();
+          pushOrderToUltimatePOS(order.id);
 
           setTimeout(() => {
             navigate('/order-confirmation', {
@@ -111,6 +114,7 @@ export default function PaymentCallback() {
         setStatus('success');
         setOrderNumber(order.order_number);
         clearCart();
+        pushOrderToUltimatePOS(orderId);
 
         setTimeout(() => {
           navigate('/order-confirmation', {
