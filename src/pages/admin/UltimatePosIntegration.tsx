@@ -46,6 +46,7 @@ interface UltimatePosConfig {
   sync_order_order_type: string;
   last_webhook_at: string | null;
   last_webhook_event: string | null;
+  direct_server_ip: string | null;
 }
 
 interface SyncLog {
@@ -137,6 +138,7 @@ export default function UltimatePosIntegration() {
     sync_order_status_cancelled: 'cancelled',
     sync_order_location_id: null as number | null,
     sync_order_order_type: 'dine_in',
+    direct_server_ip: '',
   });
 
   const showToast = (type: 'success' | 'error' | 'info', text: string) => {
@@ -191,6 +193,7 @@ export default function UltimatePosIntegration() {
           sync_order_status_cancelled: configData.sync_order_status_cancelled,
           sync_order_location_id: configData.sync_order_location_id,
           sync_order_order_type: configData.sync_order_order_type,
+          direct_server_ip: configData.direct_server_ip || '',
         });
       }
     } catch {
@@ -575,7 +578,7 @@ export default function UltimatePosIntegration() {
                     <ul className="space-y-1.5 text-xs text-sky-600">
                       <li><span className="font-semibold">1. Check your API URL:</span> If UltimatePOS was installed with /public, include it (e.g. https://yoursite.com/public). The system automatically tries both with and without /public.</li>
                       <li><span className="font-semibold">2. Verify API Connector module:</span> Go to UltimatePOS admin → Modules → make sure "API or Connector" module is installed and enabled.</li>
-                      <li><span className="font-semibold">3. Check Cloudflare:</span> If your site uses Cloudflare, use a Personal Access Token (PAT) instead of OAuth. Generate one from UltimatePOS admin → your profile → Personal Access Tokens.</li>
+                      <li><span className="font-semibold">3. Cloudflare bypass:</span> If your site uses Cloudflare, enter the server's direct IP address in the Direct Server IP field above. This bypasses Cloudflare's bot protection by connecting to the server directly.</li>
                       <li><span className="font-semibold">4. Verify Business ID:</span> Make sure the business ID matches your UltimatePOS business number.</li>
                       <li><span className="font-semibold">5. Use Run Diagnostics:</span> Click "Run Diagnostics" above for a detailed breakdown of what's happening with each URL.</li>
                     </ul>
@@ -647,6 +650,19 @@ export default function UltimatePosIntegration() {
                     placeholder="https://your-store.ultimatepos.com"
                     className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
                   />
+                </div>
+
+                {/* Direct Server IP (Cloudflare bypass) */}
+                <div>
+                  <label className="mb-1.5 block text-xs font-semibold uppercase tracking-wider text-ink-500">Direct Server IP (Cloudflare Bypass)</label>
+                  <input
+                    type={showSecrets ? 'text' : 'password'}
+                    value={formData.direct_server_ip}
+                    onChange={(e) => setFormData({ ...formData, direct_server_ip: e.target.value })}
+                    placeholder="e.g. 50.6.156.135 (leave empty if not needed)"
+                    className="w-full rounded-lg border border-ink-200 bg-ivory-50 px-4 py-2.5 text-sm text-ink-900 outline-none focus:border-ocean-500 focus:bg-white focus:ring-2 focus:ring-ocean-200"
+                  />
+                  <p className="mt-1 text-xs text-ink-400">If your UltimatePOS site is behind Cloudflare, enter the server's direct IP address here to bypass it. The system will route API requests directly to the server using this IP while keeping the correct Host header.</p>
                 </div>
 
                 {/* Auth Mode */}

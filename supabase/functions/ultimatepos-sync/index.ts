@@ -48,6 +48,7 @@ interface UltimatePosConfig {
   sync_order_order_type: string;
   last_webhook_at: string | null;
   last_webhook_event: string | null;
+  direct_server_ip: string | null;
 }
 
 function jsonResponse(data: unknown, status = 200): Response {
@@ -73,11 +74,6 @@ async function getConfig(supabase: any): Promise<UltimatePosConfig | null> {
 
 // ============================================================
 // URL normalization
-// UltimatePOS can be installed at various paths:
-//   https://example.com/  (if /public was removed)
-//   https://example.com/public/
-//   https://example.com/pos/public/
-// We try the URL as-is first, then with /public appended.
 // ============================================================
 function normalizeBaseUrl(rawUrl: string): string {
   return rawUrl.replace(/\/+$/, "");
@@ -93,28 +89,55 @@ function getCandidateBaseUrls(rawUrl: string): string[] {
 }
 
 // ============================================================
+// Cloudflare bypass: when a direct server IP is configured, we
+// rewrite the URL to use the IP directly and set the Host header
+// so the origin server routes the request correctly.
+// ============================================================
+function getHostFromUrl(rawUrl: string): string {
+  try {
+    return new URL(rawUrl).host;
+  } catch {
+    return "";
+  }
+}
+
+function rewriteUrlWithIp(url: string, directIp: string): string {
+  try {
+    const parsed = new URL(url);
+    parsed.hostname = directIp;
+    parsed.protocol = "http:";
+    parsed.port = "";
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+function buildFetchOptions(
+  method: string,
+  headers: Record<string, string>,
+  body?: string | undefined,
+  directIp?: string | null,
+  originalUrl?: string,
+): { method: string; headers: Record<string, string>; body?: string | undefined } {
+  const finalHeaders: Record<string, string> = { ...headers };
+  if (directIp && originalUrl) {
+    const host = getHostFromUrl(originalUrl);
+    if (host) finalHeaders["Host"] = host;
+  }
+  return {
+    method,
+    headers: finalHeaders,
+    body: body !== undefined ? body : undefined,
+  };
+}
+
+// ============================================================
 // Response checking
 // ============================================================
 function isHtmlResponse(text: string): boolean {
   const lower = text.trimStart().toLowerCase();
   return lower.startsWith("<!doctype") || lower.startsWith("<html") || lower.startsWith("<head");
-}
-
-function checkApiResponse(resp: Response, text: string, context: string): void {
-  if (isHtmlResponse(text)) {
-    throw new Error(
-      `${context}: UltimatePOS returned an HTML page instead of a JSON API response. ` +
-      `This usually means: (1) the API URL is wrong — try adding /public to your URL (e.g. https://yoursite.com/public), ` +
-      `(2) the API Connector module is not installed/enabled in UltimatePOS, or ` +
-      `(3) Cloudflare or a firewall is blocking the API request. ` +
-      `Response started with: ${text.substring(0, 100)}`
-    );
-  }
-  if (!resp.ok) {
-    throw new Error(
-      `${context}: UltimatePOS returned HTTP ${resp.status}. Response: ${text.substring(0, 300)}`
-    );
-  }
 }
 
 // ============================================================
@@ -125,7 +148,6 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
     return { token: config.personal_access_token, baseUrl: normalizeBaseUrl(config.api_url || "") };
   }
 
-  // OAuth password grant — try candidate URLs
   const candidates = getCandidateBaseUrls(config.api_url || "");
   const errors: string[] = [];
 
@@ -138,14 +160,19 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
         client_secret: config.client_secret || "",
         username: config.username || "",
         password: config.password || "",
-        scope: "pos",
       });
 
-      const resp = await fetch(tokenUrl, {
+      const fetchUrl = config.direct_server_ip
+        ? rewriteUrlWithIp(tokenUrl, config.direct_server_ip)
+        : tokenUrl;
+
+      const resp = await fetch(fetchUrl, {
         method: "POST",
+        redirect: config.direct_server_ip ? "manual" : "follow",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "application/json",
+          ...(config.direct_server_ip ? { Host: getHostFromUrl(tokenUrl) } : {}),
         },
         body: body.toString(),
       });
@@ -177,7 +204,8 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
     `Common fixes:\n` +
     `- Make sure your API URL includes /public if UltimatePOS was installed with it (e.g. https://yoursite.com/public)\n` +
     `- Verify the API Connector module is installed and enabled in UltimatePOS\n` +
-    `- Check that client_id, client_secret, username, and password are all correct`
+    `- Check that client_id, client_secret, username, and password are all correct\n` +
+    `- If your site is behind Cloudflare, set the Direct Server IP to bypass it`
   );
 }
 
@@ -190,7 +218,8 @@ function authHeaders(token: string): Record<string, string> {
 }
 
 // ============================================================
-// API request helper — tries candidate base URLs
+// API request helper — tries candidate base URLs, with
+// Cloudflare bypass via direct IP when configured
 // ============================================================
 async function apiRequest(
   config: UltimatePosConfig,
@@ -200,7 +229,6 @@ async function apiRequest(
 ): Promise<{ data: any; baseUrl: string; rawText: string; status: number }> {
   const { token, baseUrl: authBaseUrl } = await getAuthToken(config);
 
-  // For PAT mode, also try /public fallback if the first attempt returns HTML
   const candidates = config.auth_mode === "pat"
     ? getCandidateBaseUrls(config.api_url || "")
     : [authBaseUrl];
@@ -209,10 +237,20 @@ async function apiRequest(
 
   for (const baseUrl of candidates) {
     const url = `${baseUrl}${path}`;
+    const fetchUrl = config.direct_server_ip
+      ? rewriteUrlWithIp(url, config.direct_server_ip)
+      : url;
+
     try {
-      const resp = await fetch(url, {
+      const headers = authHeaders(token);
+      if (config.direct_server_ip) {
+        headers["Host"] = getHostFromUrl(url);
+      }
+
+      const resp = await fetch(fetchUrl, {
         method,
-        headers: authHeaders(token),
+        redirect: config.direct_server_ip ? "manual" : "follow",
+        headers,
         body: body ? JSON.stringify(body) : undefined,
       });
       const text = await resp.text();
@@ -223,12 +261,10 @@ async function apiRequest(
       }
 
       if (!resp.ok) {
-        // If this is a 404, try next candidate
         if (resp.status === 404 && candidates.length > 1) {
           errors.push(`${url} returned 404`);
           continue;
         }
-        // Non-404 error — this URL is responding to the API, just an error
         throw new Error(`UltimatePOS API returned HTTP ${resp.status}: ${text.substring(0, 500)}`);
       }
 
@@ -511,7 +547,7 @@ async function pushSale(supabase: any, config: UltimatePosConfig, pushId: string
 
   try {
     const path = `/connector/api/sell?business_id=${config.business_id}&location_id=${config.location_id}`;
-    const { data: responseData, baseUrl } = await apiRequest(config, path, "POST", payload);
+    const { data: responseData } = await apiRequest(config, path, "POST", payload);
 
     const saleId = responseData.id ? String(responseData.id) : (responseData.sale_id ? String(responseData.sale_id) : null);
 
@@ -596,7 +632,9 @@ async function processPendingSales(supabase: any, config: UltimatePosConfig): Pr
 }
 
 // ============================================================
-// Connection test — tries multiple URL variants and reports
+// Connection test — tries multiple URL variants, uses direct IP
+// when configured, and tests the product endpoint (not business,
+// which may not exist on all installations)
 // ============================================================
 async function testConnection(config: UltimatePosConfig): Promise<Response> {
   const diagnostics: any[] = [];
@@ -604,6 +642,12 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
 
   let token: string | null = null;
   let workingBaseUrl: string | null = null;
+
+  diagnostics.push({
+    step: "config",
+    status: "info",
+    message: `auth_mode=${config.auth_mode}, business_id=${config.business_id}, location_id=${config.location_id}, direct_ip=${config.direct_server_ip || "not set"}`,
+  });
 
   // Step 1: Get auth token
   try {
@@ -614,7 +658,7 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
       const authResult = await getAuthToken(config);
       token = authResult.token;
       workingBaseUrl = authResult.baseUrl;
-      diagnostics.push({ step: "auth", status: "ok", message: `OAuth token obtained from ${workingBaseUrl}` });
+      diagnostics.push({ step: "auth", status: "ok", message: `OAuth token obtained from ${workingBaseUrl}${config.direct_server_ip ? " via direct IP " + config.direct_server_ip : ""}` });
     }
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
@@ -629,9 +673,18 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
   const apiErrors: string[] = [];
 
   for (const baseUrl of urlsToTry) {
-    const apiUrl = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
+    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
+    const fetchUrl = config.direct_server_ip
+      ? rewriteUrlWithIp(apiUrl, config.direct_server_ip)
+      : apiUrl;
+
     try {
-      const resp = await fetch(apiUrl, { method: "GET", headers: authHeaders(token) });
+      const headers = authHeaders(token);
+      if (config.direct_server_ip) {
+        headers["Host"] = getHostFromUrl(apiUrl);
+      }
+
+      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
       const text = await resp.text();
 
       if (isHtmlResponse(text)) {
@@ -659,7 +712,8 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
         success: true,
         connected: true,
         working_url: baseUrl,
-        business: data,
+        using_direct_ip: !!config.direct_server_ip,
+        product_count: data.meta?.total ?? (data.data?.length ?? 0),
         diagnostics,
       });
     } catch (err) {
@@ -678,7 +732,7 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
     summary: "All URL attempts failed. Most common causes:\n" +
       "1. Wrong API URL — if UltimatePOS was installed with /public, add it to your URL (e.g. https://yoursite.com/public)\n" +
       "2. API Connector module not installed — go to UltimatePOS admin → Modules → install/enable 'API or Connector'\n" +
-      "3. Cloudflare blocking — if your site uses Cloudflare, the API may need a Personal Access Token (PAT) instead of OAuth\n" +
+      "3. Cloudflare blocking — set the Direct Server IP to bypass Cloudflare\n" +
       "4. Wrong business_id — make sure the business ID matches your UltimatePOS business",
     tried_urls: urlsToTry,
   }, null, 2));
@@ -700,6 +754,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
       has_client_secret: !!config.client_secret,
       has_username: !!config.username,
       has_password: !!config.password,
+      direct_server_ip: config.direct_server_ip,
     },
     candidate_urls: getCandidateBaseUrls(config.api_url || ""),
     steps: [] as any[],
@@ -707,11 +762,16 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
 
   // Test 1: Check if base URL is reachable at all
   for (const baseUrl of diag.candidate_urls) {
+    const fetchUrl = config.direct_server_ip
+      ? rewriteUrlWithIp(baseUrl, config.direct_server_ip)
+      : baseUrl;
     try {
-      const resp = await fetch(baseUrl, { method: "GET", redirect: "follow" });
+      const headers: Record<string, string> = {};
+      if (config.direct_server_ip) headers["Host"] = getHostFromUrl(baseUrl);
+      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
       const text = await resp.text();
       diag.steps.push({
-        step: `reachability:${baseUrl}`,
+        step: `reachability:${baseUrl}${config.direct_server_ip ? " (via " + config.direct_server_ip + ")" : ""}`,
         status: resp.status,
         content_type: resp.headers.get("content-type"),
         is_html: isHtmlResponse(text),
@@ -725,21 +785,20 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
     }
   }
 
-  // Test 2: Check if /connector/api/business endpoint exists
+  // Test 2: Check if /connector/api/product endpoint exists
   for (const baseUrl of diag.candidate_urls) {
-    const apiUrl = `${baseUrl}/connector/api/business?business_id=${config.business_id}`;
+    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
+    const fetchUrl = config.direct_server_ip
+      ? rewriteUrlWithIp(apiUrl, config.direct_server_ip)
+      : apiUrl;
     try {
-      const token = config.auth_mode === "pat" && config.personal_access_token
-        ? config.personal_access_token
-        : null;
-
       const headers: Record<string, string> = { "Accept": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+      if (config.direct_server_ip) headers["Host"] = getHostFromUrl(apiUrl);
 
-      const resp = await fetch(apiUrl, { method: "GET", headers });
+      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
       const text = await resp.text();
       diag.steps.push({
-        step: `api:${apiUrl}`,
+        step: `api:${apiUrl}${config.direct_server_ip ? " (via " + config.direct_server_ip + ")" : ""}`,
         status: resp.status,
         is_html: isHtmlResponse(text),
         body_preview: text.substring(0, 300),
@@ -756,15 +815,25 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
   if (config.auth_mode === "oauth") {
     for (const baseUrl of diag.candidate_urls) {
       const tokenUrl = `${baseUrl}/oauth/token`;
+      const fetchUrl = config.direct_server_ip
+        ? rewriteUrlWithIp(tokenUrl, config.direct_server_ip)
+        : tokenUrl;
       try {
-        const resp = await fetch(tokenUrl, {
+        const headers: Record<string, string> = {
+          "Content-Type": "application/x-www-form-urlencoded",
+          "Accept": "application/json",
+        };
+        if (config.direct_server_ip) headers["Host"] = getHostFromUrl(tokenUrl);
+
+        const resp = await fetch(fetchUrl, {
           method: "POST",
-          headers: { "Content-Type": "application/x-www-form-urlencoded", "Accept": "application/json" },
+          redirect: config.direct_server_ip ? "manual" : "follow",
+          headers,
           body: "grant_type=password&test=1",
         });
         const text = await resp.text();
         diag.steps.push({
-          step: `oauth:${tokenUrl}`,
+          step: `oauth:${tokenUrl}${config.direct_server_ip ? " (via " + config.direct_server_ip + ")" : ""}`,
           status: resp.status,
           is_html: isHtmlResponse(text),
           body_preview: text.substring(0, 300),
@@ -1047,3 +1116,4 @@ Deno.serve(async (req: Request) => {
     return errorResponse(500, "Internal server error", error instanceof Error ? error.message : String(error));
   }
 });
+
