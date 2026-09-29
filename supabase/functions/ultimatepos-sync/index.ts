@@ -1,4 +1,4 @@
-// UltimatePOS Sync — Cloudflare bypass via direct IP + OAuth password grant (v3 - raw TCP)
+// UltimatePOS Sync — Cloudflare bypass via direct IP + OAuth password grant (v4 - price fix)
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -450,7 +450,7 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
   const logId = await createSyncLog(supabase, "products", startedAt);
 
   try {
-    const path = `/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=100`;
+    const path = `/connector/api/product?business_id=${config.business_id}&per_page=100`;
     const { data: result } = await apiRequest(config, path);
 
     const products: any[] = result.data || result.products || result || [];
@@ -462,9 +462,18 @@ async function syncProducts(supabase: any, config: UltimatePosConfig): Promise<R
     for (const up of productArray) {
       const ultimateposId = String(up.id);
       const name = (config.sync_product_name ? (up.name || up.product_name || "Unnamed") : null);
-      const price = config.sync_product_price ? parseFloat(up.sell_price || up.price || up.selling_price || "0") : null;
-      const description = config.sync_product_description ? (up.description || up.product_description || "") : null;
+      const description = config.sync_product_description ? (up.product_description || up.description || "") : null;
       const imageUrl = config.sync_product_images ? (up.image_url || up.image || null) : null;
+      let price: number | null = null;
+      if (config.sync_product_price) {
+        const variationPrice = up.product_variations?.[0]?.variations?.[0]?.default_sell_price
+          || up.product_variations?.[0]?.variations?.[0]?.sell_price_inc_tax
+          || up.sell_price
+          || up.price
+          || up.selling_price
+          || "0";
+        price = parseFloat(variationPrice);
+      }
 
       const { data: existing } = await supabase
         .from("products")
@@ -781,7 +790,7 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
   const apiErrors: string[] = [];
 
   for (const baseUrl of urlsToTry) {
-    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
+    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&per_page=1`;
 
     try {
       const headers = authHeaders(token);
@@ -891,7 +900,7 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
 
   // Test 2: Check if /connector/api/product endpoint exists
   for (const baseUrl of diag.candidate_urls) {
-    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
+    const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&per_page=1`;
     try {
       const resp = await fetchWithBypass(apiUrl, {
         method: "GET",
