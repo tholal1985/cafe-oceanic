@@ -1,4 +1,4 @@
-// UltimatePOS Sync — Cloudflare bypass via direct IP + OAuth password grant (v2)
+// UltimatePOS Sync — Cloudflare bypass via direct IP + OAuth password grant (v3 - raw TCP)
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -116,6 +116,22 @@ function rewriteUrlWithIp(url: string, directIp: string): string {
   }
 }
 
+function decodeChunked(body: string): string {
+  let result = "";
+  let pos = 0;
+  while (pos < body.length) {
+    const lineEnd = body.indexOf("\r\n", pos);
+    if (lineEnd === -1) break;
+    const sizeStr = body.substring(pos, lineEnd).trim();
+    const chunkSize = parseInt(sizeStr, 16);
+    if (isNaN(chunkSize) || chunkSize === 0) break;
+    pos = lineEnd + 2;
+    result += body.substring(pos, pos + chunkSize);
+    pos += chunkSize + 2;
+  }
+  return result;
+}
+
 async function fetchWithBypass(
   url: string,
   options: RequestInit & { directIp?: string },
@@ -177,7 +193,6 @@ async function fetchWithBypass(
   const responseStr = decoder.decode(fullResponse);
   const headerEnd = responseStr.indexOf("\r\n\r\n");
   const headerSection = responseStr.substring(0, headerEnd);
-  const responseBody = responseStr.substring(headerEnd + 4);
   const [statusLine, ...headerLines] = headerSection.split("\r\n");
   const statusCode = parseInt(statusLine.split(" ")[1] || "0", 10);
 
@@ -189,6 +204,14 @@ async function fetchWithBypass(
       const value = line.substring(colonIdx + 1).trim();
       responseHeaders.set(key, value);
     }
+  }
+
+  // Decode chunked transfer encoding if present
+  let responseBody = responseStr.substring(headerEnd + 4);
+  const isChunked = responseHeaders.get("transfer-encoding")?.toLowerCase().includes("chunked");
+  if (isChunked) {
+    responseBody = decodeChunked(responseBody);
+    responseHeaders.delete("transfer-encoding");
   }
 
   // Handle redirects manually (rewriting to direct IP)
