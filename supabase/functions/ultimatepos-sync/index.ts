@@ -1,3 +1,4 @@
+// UltimatePOS Sync — Cloudflare bypass via direct IP + OAuth password grant (v2)
 import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 import { createClient } from "npm:@supabase/supabase-js@2";
 
@@ -92,6 +93,8 @@ function getCandidateBaseUrls(rawUrl: string): string[] {
 // Cloudflare bypass: when a direct server IP is configured, we
 // rewrite the URL to use the IP directly and set the Host header
 // so the origin server routes the request correctly.
+// The server may redirect HTTP→HTTPS; we follow manually but
+// keep rewriting to the direct IP to stay behind Cloudflare.
 // ============================================================
 function getHostFromUrl(rawUrl: string): string {
   try {
@@ -111,6 +114,99 @@ function rewriteUrlWithIp(url: string, directIp: string): string {
   } catch {
     return url;
   }
+}
+
+async function fetchWithBypass(
+  url: string,
+  options: RequestInit & { directIp?: string },
+): Promise<Response> {
+  const directIp = (options as any).directIp;
+  const cleanOptions = { ...options } as any;
+  delete cleanOptions.directIp;
+
+  if (!directIp) {
+    return await fetch(url, { ...cleanOptions, redirect: "follow" });
+  }
+
+  const originalUrl = new URL(url);
+  const host = originalUrl.host;
+  const path = originalUrl.pathname + originalUrl.search;
+  const method = (cleanOptions.method as string) || "GET";
+  const body = cleanOptions.body as string | undefined;
+  const headers = new Headers(cleanOptions.headers || {});
+
+  // Build raw HTTP request — Deno's fetch strips the Host header,
+  // so we use a raw TCP connection to send it manually.
+  const conn = await Deno.connect({ hostname: directIp, port: 80 });
+  const lines: string[] = [
+    `${method} ${path} HTTP/1.1`,
+    `Host: ${host}`,
+    `Connection: close`,
+  ];
+  for (const [key, value] of headers.entries()) {
+    if (key.toLowerCase() !== "host") lines.push(`${key}: ${value}`);
+  }
+  if (body) {
+    const bodyBytes = new TextEncoder().encode(body);
+    lines.push(`Content-Length: ${bodyBytes.length}`);
+  }
+  const requestStr = lines.join("\r\n") + "\r\n\r\n" + (body || "");
+  const requestBytes = new TextEncoder().encode(requestStr);
+  await conn.write(requestBytes);
+
+  // Read full response
+  const responseChunks: Uint8Array[] = [];
+  const buf = new Uint8Array(65536);
+  while (true) {
+    const n = await conn.read(buf);
+    if (n === null) break;
+    responseChunks.push(buf.slice(0, n));
+  }
+  conn.close();
+
+  // Parse raw HTTP response
+  const totalLen = responseChunks.reduce((sum, c) => sum + c.length, 0);
+  const fullResponse = new Uint8Array(totalLen);
+  let offset = 0;
+  for (const chunk of responseChunks) {
+    fullResponse.set(chunk, offset);
+    offset += chunk.length;
+  }
+
+  const decoder = new TextDecoder();
+  const responseStr = decoder.decode(fullResponse);
+  const headerEnd = responseStr.indexOf("\r\n\r\n");
+  const headerSection = responseStr.substring(0, headerEnd);
+  const responseBody = responseStr.substring(headerEnd + 4);
+  const [statusLine, ...headerLines] = headerSection.split("\r\n");
+  const statusCode = parseInt(statusLine.split(" ")[1] || "0", 10);
+
+  const responseHeaders = new Headers();
+  for (const line of headerLines) {
+    const colonIdx = line.indexOf(":");
+    if (colonIdx > 0) {
+      const key = line.substring(0, colonIdx).trim();
+      const value = line.substring(colonIdx + 1).trim();
+      responseHeaders.set(key, value);
+    }
+  }
+
+  // Handle redirects manually (rewriting to direct IP)
+  if ((statusCode >= 301 && statusCode <= 308) && responseHeaders.get("location")) {
+    const location = responseHeaders.get("location")!;
+    const redirectUrl = location.startsWith("http") ? location : new URL(location, url).toString();
+    return await fetchWithBypass(redirectUrl, {
+      ...cleanOptions,
+      directIp,
+      method: statusCode === 303 ? "GET" : method,
+      body: statusCode === 303 ? undefined : body,
+    });
+  }
+
+  return new Response(responseBody, {
+    status: statusCode,
+    headers: responseHeaders,
+  });
 }
 
 function buildFetchOptions(
@@ -162,17 +258,12 @@ async function getAuthToken(config: UltimatePosConfig): Promise<{ token: string;
         password: config.password || "",
       });
 
-      const fetchUrl = config.direct_server_ip
-        ? rewriteUrlWithIp(tokenUrl, config.direct_server_ip)
-        : tokenUrl;
-
-      const resp = await fetch(fetchUrl, {
+      const resp = await fetchWithBypass(tokenUrl, {
         method: "POST",
-        redirect: config.direct_server_ip ? "manual" : "follow",
+        directIp: config.direct_server_ip || undefined,
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           "Accept": "application/json",
-          ...(config.direct_server_ip ? { Host: getHostFromUrl(tokenUrl) } : {}),
         },
         body: body.toString(),
       });
@@ -237,19 +328,13 @@ async function apiRequest(
 
   for (const baseUrl of candidates) {
     const url = `${baseUrl}${path}`;
-    const fetchUrl = config.direct_server_ip
-      ? rewriteUrlWithIp(url, config.direct_server_ip)
-      : url;
 
     try {
       const headers = authHeaders(token);
-      if (config.direct_server_ip) {
-        headers["Host"] = getHostFromUrl(url);
-      }
 
-      const resp = await fetch(fetchUrl, {
+      const resp = await fetchWithBypass(url, {
         method,
-        redirect: config.direct_server_ip ? "manual" : "follow",
+        directIp: config.direct_server_ip || undefined,
         headers,
         body: body ? JSON.stringify(body) : undefined,
       });
@@ -674,17 +759,15 @@ async function testConnection(config: UltimatePosConfig): Promise<Response> {
 
   for (const baseUrl of urlsToTry) {
     const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
-    const fetchUrl = config.direct_server_ip
-      ? rewriteUrlWithIp(apiUrl, config.direct_server_ip)
-      : apiUrl;
 
     try {
       const headers = authHeaders(token);
-      if (config.direct_server_ip) {
-        headers["Host"] = getHostFromUrl(apiUrl);
-      }
 
-      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
+      const resp = await fetchWithBypass(apiUrl, {
+        method: "GET",
+        directIp: config.direct_server_ip || undefined,
+        headers,
+      });
       const text = await resp.text();
 
       if (isHtmlResponse(text)) {
@@ -762,13 +845,11 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
 
   // Test 1: Check if base URL is reachable at all
   for (const baseUrl of diag.candidate_urls) {
-    const fetchUrl = config.direct_server_ip
-      ? rewriteUrlWithIp(baseUrl, config.direct_server_ip)
-      : baseUrl;
     try {
-      const headers: Record<string, string> = {};
-      if (config.direct_server_ip) headers["Host"] = getHostFromUrl(baseUrl);
-      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
+      const resp = await fetchWithBypass(baseUrl, {
+        method: "GET",
+        directIp: config.direct_server_ip || undefined,
+      });
       const text = await resp.text();
       diag.steps.push({
         step: `reachability:${baseUrl}${config.direct_server_ip ? " (via " + config.direct_server_ip + ")" : ""}`,
@@ -788,14 +869,12 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
   // Test 2: Check if /connector/api/product endpoint exists
   for (const baseUrl of diag.candidate_urls) {
     const apiUrl = `${baseUrl}/connector/api/product?business_id=${config.business_id}&location_id=${config.location_id}&per_page=1`;
-    const fetchUrl = config.direct_server_ip
-      ? rewriteUrlWithIp(apiUrl, config.direct_server_ip)
-      : apiUrl;
     try {
-      const headers: Record<string, string> = { "Accept": "application/json" };
-      if (config.direct_server_ip) headers["Host"] = getHostFromUrl(apiUrl);
-
-      const resp = await fetch(fetchUrl, { method: "GET", redirect: config.direct_server_ip ? "manual" : "follow", headers });
+      const resp = await fetchWithBypass(apiUrl, {
+        method: "GET",
+        directIp: config.direct_server_ip || undefined,
+        headers: { "Accept": "application/json" },
+      });
       const text = await resp.text();
       diag.steps.push({
         step: `api:${apiUrl}${config.direct_server_ip ? " (via " + config.direct_server_ip + ")" : ""}`,
@@ -815,20 +894,14 @@ async function debugConnection(config: UltimatePosConfig): Promise<Response> {
   if (config.auth_mode === "oauth") {
     for (const baseUrl of diag.candidate_urls) {
       const tokenUrl = `${baseUrl}/oauth/token`;
-      const fetchUrl = config.direct_server_ip
-        ? rewriteUrlWithIp(tokenUrl, config.direct_server_ip)
-        : tokenUrl;
       try {
-        const headers: Record<string, string> = {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "Accept": "application/json",
-        };
-        if (config.direct_server_ip) headers["Host"] = getHostFromUrl(tokenUrl);
-
-        const resp = await fetch(fetchUrl, {
+        const resp = await fetchWithBypass(tokenUrl, {
           method: "POST",
-          redirect: config.direct_server_ip ? "manual" : "follow",
-          headers,
+          directIp: config.direct_server_ip || undefined,
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+          },
           body: "grant_type=password&test=1",
         });
         const text = await resp.text();
@@ -1117,3 +1190,4 @@ Deno.serve(async (req: Request) => {
   }
 });
 
+// v3
