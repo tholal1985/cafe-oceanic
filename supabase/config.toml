@@ -1,0 +1,44 @@
+[project_id]
+project_id = "kioskpos-api-gateway"
+
+[functions.api]
+verify_jwt = false
+
+[functions.kioskpos-api]
+verify_jwt = false
+
+[functions.create-backup]
+verify_jwt = true
+
+[functions.restore-backup]
+verify_jwt = false
+
+[functions.export-product-pack]
+verify_jwt = true
+
+[functions.import-product-pack]
+verify_jwt = true
+
+[functions.initiate-payment]
+verify_jwt = false
+
+[functions.manage-users]
+verify_jwt = true
+
+[functions.payment-webhook]
+verify_jwt = false
+
+[functions.send-sms]
+verify_jwt = true
+
+[functions.send-viber]
+verify_jwt = true
+
+[functions.send-whatsapp]
+verify_jwt = true
+
+[functions.ultimatepos-proxy]
+verify_jwt = true
+
+[functions.verify-payment]
+verify_jwt = false

@@ -4,7 +4,8 @@ import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
   Settings, Lock, Key, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet, Link2
+  ExternalLink, Search, Layers, ShieldCheck, Wallet, Link2,
+  Network, RefreshCw, AlertTriangle, BookOpen, CreditCard
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -45,6 +46,21 @@ const NAV_GROUPS = [
     label: 'Finance',
     items: [
       { path: '/admin/payment-transactions', icon: Receipt, label: 'Transactions' },
+    ],
+  },
+  {
+    label: 'API Gateway',
+    items: [
+      { path: '/admin/gateway', icon: Network, label: 'Gateway Dashboard', adminOnly: true },
+      { path: '/admin/gateway-kiosks', icon: Monitor, label: 'Kiosk Terminals', adminOnly: true },
+      { path: '/admin/gateway-orders', icon: ShoppingBag, label: 'Gateway Orders', adminOnly: true },
+      { path: '/admin/gateway-products', icon: Package, label: 'Product Cache', adminOnly: true },
+      { path: '/admin/gateway-payments', icon: CreditCard, label: 'Gateway Payments', adminOnly: true },
+      { path: '/admin/gateway-sync', icon: RefreshCw, label: 'Synchronization', adminOnly: true },
+      { path: '/admin/gateway-failed', icon: AlertTriangle, label: 'Failed Orders', adminOnly: true },
+      { path: '/admin/gateway-logs', icon: BookOpen, label: 'API Logs', adminOnly: true },
+      { path: '/admin/gateway-settings', icon: Settings, label: 'Gateway Settings', adminOnly: true },
+      { path: '/admin/gateway-docs', icon: BookOpen, label: 'API Documentation', adminOnly: true },
     ],
   },
   {

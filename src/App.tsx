@@ -31,6 +31,16 @@ import ActivationKeys from './pages/admin/ActivationKeys';
 import PackTiers from './pages/admin/PackTiers';
 import CustomerBilling from './pages/admin/CustomerBilling';
 import UltimatePOSIntegration from './pages/admin/UltimatePOSIntegration';
+import KioskGatewayDashboard from './pages/admin/KioskGatewayDashboard';
+import KioskGatewayKiosks from './pages/admin/KioskGatewayKiosks';
+import KioskGatewayOrders from './pages/admin/KioskGatewayOrders';
+import KioskGatewayProducts from './pages/admin/KioskGatewayProducts';
+import KioskGatewayPayments from './pages/admin/KioskGatewayPayments';
+import KioskGatewaySync from './pages/admin/KioskGatewaySync';
+import KioskGatewayFailedOrders from './pages/admin/KioskGatewayFailedOrders';
+import KioskGatewayApiLogs from './pages/admin/KioskGatewayApiLogs';
+import KioskGatewaySettings from './pages/admin/KioskGatewaySettings';
+import KioskGatewayApiDocs from './pages/admin/KioskGatewayApiDocs';
 
 import CustomerLogin from './pages/customer/CustomerLogin';
 import CustomerRegister from './pages/customer/CustomerRegister';
@@ -75,6 +85,16 @@ function App() {
             <Route path="pack-tiers" element={<PackTiers />} />
             <Route path="activation-keys" element={<ActivationKeys />} />
             <Route path="ultimatepos" element={<UltimatePOSIntegration />} />
+            <Route path="gateway" element={<KioskGatewayDashboard />} />
+            <Route path="gateway-kiosks" element={<KioskGatewayKiosks />} />
+            <Route path="gateway-orders" element={<KioskGatewayOrders />} />
+            <Route path="gateway-products" element={<KioskGatewayProducts />} />
+            <Route path="gateway-payments" element={<KioskGatewayPayments />} />
+            <Route path="gateway-sync" element={<KioskGatewaySync />} />
+            <Route path="gateway-failed" element={<KioskGatewayFailedOrders />} />
+            <Route path="gateway-logs" element={<KioskGatewayApiLogs />} />
+            <Route path="gateway-settings" element={<KioskGatewaySettings />} />
+            <Route path="gateway-docs" element={<KioskGatewayApiDocs />} />
           </Route>
         </Routes>
       </IdleTimer>
