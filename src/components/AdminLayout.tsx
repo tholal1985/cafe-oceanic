@@ -3,9 +3,8 @@ import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
-  Settings, Lock, Key, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet, Link2,
-  Network, RefreshCw, AlertTriangle, BookOpen, CreditCard
+  Settings, Lock, Menu, X, ChevronLeft, ChevronRight, KeyRound,
+  ExternalLink, Search, Layers, ShieldCheck, Wallet, Code, Server
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -49,26 +48,16 @@ const NAV_GROUPS = [
     ],
   },
   {
-    label: 'API Gateway',
+    label: 'Integrations',
     items: [
-      { path: '/admin/gateway', icon: Network, label: 'Gateway Dashboard', adminOnly: true },
-      { path: '/admin/gateway-kiosks', icon: Monitor, label: 'Kiosk Terminals', adminOnly: true },
-      { path: '/admin/gateway-orders', icon: ShoppingBag, label: 'Gateway Orders', adminOnly: true },
-      { path: '/admin/gateway-products', icon: Package, label: 'Product Cache', adminOnly: true },
-      { path: '/admin/gateway-payments', icon: CreditCard, label: 'Gateway Payments', adminOnly: true },
-      { path: '/admin/gateway-sync', icon: RefreshCw, label: 'Synchronization', adminOnly: true },
-      { path: '/admin/gateway-failed', icon: AlertTriangle, label: 'Failed Orders', adminOnly: true },
-      { path: '/admin/gateway-logs', icon: BookOpen, label: 'API Logs', adminOnly: true },
-      { path: '/admin/gateway-settings', icon: Settings, label: 'Gateway Settings', adminOnly: true },
-      { path: '/admin/gateway-docs', icon: BookOpen, label: 'API Documentation', adminOnly: true },
+      { path: '/admin/rest-api', icon: Code, label: 'REST API Keys' },
+      { path: '/admin/ultimatepos', icon: Server, label: 'UltimatePOS' },
     ],
   },
   {
     label: 'System',
     items: [
       { path: '/admin/messaging', icon: MessageCircle, label: 'Messaging' },
-      { path: '/admin/ultimatepos', icon: Link2, label: 'UltimatePOS', adminOnly: true },
-      { path: '/admin/api-keys', icon: Key, label: 'API Keys' },
       { path: '/admin/settings', icon: Settings, label: 'Settings', requireSettingsEdit: true },
       { path: '/admin/backup', icon: Database, label: 'Backup & Restore', adminOnly: true },
     ],

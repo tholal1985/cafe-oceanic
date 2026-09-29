@@ -8,7 +8,6 @@ import { supabase } from '../lib/supabase';
 import { useStore } from '../store/useStore';
 import { sendOrderConfirmation } from '../lib/messagingService';
 import { PaymentService } from '../lib/paymentService';
-import { pushOrderToUltimatePOS } from '../lib/ultimatePosService';
 import { useCurrency } from '../hooks/useCurrency';
 
 export default function PaymentScreen() {
@@ -120,8 +119,6 @@ export default function PaymentScreen() {
         setCurrentOrder(order.id);
         setIsSuccess(true);
         setIsProcessing(false);
-
-        pushOrderToUltimatePOS(order.id);
 
         if (phoneNumber) {
           try {

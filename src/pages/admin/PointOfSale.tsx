@@ -1,13 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  AlertTriangle, Award, Banknote, Building2, Clock, CreditCard as Edit, DollarSign, Eye, Grid2x2 as Grid,
-  Link2, List, Mail, Minus, Phone, Plus, Receipt, Search, ShoppingCart, Trash, Trash2, User,
+  Award, Banknote, Building2, Clock, CreditCard as Edit, DollarSign, Eye, Grid2x2 as Grid,
+  List, Mail, Minus, Phone, Plus, Receipt, Search, ShoppingCart, Trash, Trash2, User,
   UserPlus, X, Power, Sparkles, CircleUser as UserCircle,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
-import { pushOrderToUltimatePOS } from '../../lib/ultimatePosService';
 
 type Product = {
   id: string;
@@ -16,7 +15,6 @@ type Product = {
   image_url: string;
   category_id: string;
   is_available: boolean;
-  ultimatepos_id: number | null;
 };
 
 type Category = { id: string; name: string; display_order: number };
@@ -399,9 +397,7 @@ export default function PointOfSale() {
         }).eq('id', selectedCustomer.id);
       }
 
-      pushOrderToUltimatePOS(order.id);
 
-      setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setAmountTendered('');
@@ -655,11 +651,6 @@ export default function PointOfSale() {
                           className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                         />
                       </div>
-                      {product.ultimatepos_id && (
-                        <div className="absolute right-2 top-2 rounded-full bg-emerald-500/90 p-1" title="Linked to Faseyha POS">
-                          <Link2 className="h-3 w-3 text-white" />
-                        </div>
-                      )}
                       <div className="p-3">
                         <h3 className="truncate text-sm font-semibold text-ink-900">{product.name}</h3>
                         <p className="mt-1 font-display text-lg text-ocean-800 tabular-nums">${product.price.toFixed(2)}</p>
@@ -679,7 +670,6 @@ export default function PointOfSale() {
                       <div className="flex-1">
                         <div className="flex items-center gap-2">
                           <h3 className="font-semibold text-ink-900">{product.name}</h3>
-                          {product.ultimatepos_id && <Link2 className="h-3.5 w-3.5 text-emerald-500" />}
                         </div>
                         <p className="font-display text-lg text-ocean-800 tabular-nums">${product.price.toFixed(2)}</p>
                       </div>
@@ -978,17 +968,6 @@ export default function PointOfSale() {
                 </div>
               </div>
 
-              {cart.some(item => !item.product.ultimatepos_id) && (
-                <div className="flex items-start gap-2.5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3">
-                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                  <div className="text-xs text-amber-800">
-                    <span className="font-medium">Some items are not linked to Faseyha POS</span> — this sale may not sync correctly.
-                    {cart.filter(item => !item.product.ultimatepos_id).map(item => (
-                      <span key={item.product.id} className="ml-1 inline-block rounded bg-amber-100 px-1.5 py-0.5 font-mono text-[10px]">{item.product.name}</span>
-                    ))}
-                  </div>
-                </div>
-              )}
 
               <button
                 onClick={processCheckout}
