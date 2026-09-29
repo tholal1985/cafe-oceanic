@@ -25,12 +25,12 @@ import BackupRestore from './pages/admin/BackupRestore';
 import PointOfSale from './pages/admin/PointOfSale';
 import Customers from './pages/admin/Customers';
 import SystemSettings from './pages/admin/SystemSettings';
+import ApiKeys from './pages/admin/ApiKeys';
 import ProductPackLicenses from './pages/admin/ProductPackLicenses';
 import ActivationKeys from './pages/admin/ActivationKeys';
-import RestApiKeys from './pages/admin/RestApiKeys';
-import UltimatePosIntegration from './pages/admin/UltimatePosIntegration';
 import PackTiers from './pages/admin/PackTiers';
 import CustomerBilling from './pages/admin/CustomerBilling';
+
 
 import CustomerLogin from './pages/customer/CustomerLogin';
 import CustomerRegister from './pages/customer/CustomerRegister';
@@ -70,11 +70,11 @@ function App() {
             <Route path="messaging" element={<MessagingSettings />} />
             <Route path="settings" element={<SystemSettings />} />
             <Route path="backup" element={<BackupRestore />} />
+            <Route path="api-keys" element={<ApiKeys />} />
             <Route path="pack-licenses" element={<ProductPackLicenses />} />
             <Route path="pack-tiers" element={<PackTiers />} />
-            <Route path="rest-api" element={<RestApiKeys />} />
-            <Route path="ultimatepos" element={<UltimatePosIntegration />} />
             <Route path="activation-keys" element={<ActivationKeys />} />
+
           </Route>
         </Routes>
       </IdleTimer>

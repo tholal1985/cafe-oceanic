@@ -397,7 +397,7 @@ export default function PointOfSale() {
         }).eq('id', selectedCustomer.id);
       }
 
-
+      setCart([]);
       setCustomerName('');
       setCustomerPhone('');
       setAmountTendered('');
@@ -967,7 +967,6 @@ export default function PointOfSale() {
                   )}
                 </div>
               </div>
-
 
               <button
                 onClick={processCheckout}

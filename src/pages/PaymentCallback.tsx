@@ -65,6 +65,7 @@ export default function PaymentCallback() {
           setStatus('success');
           setOrderNumber(order.order_number);
           clearCart();
+
           setTimeout(() => {
             navigate('/order-confirmation', {
               state: { orderId: order.id, orderNumber: order.order_number }
@@ -88,6 +89,7 @@ export default function PaymentCallback() {
           setStatus('success');
           setOrderNumber(order.order_number);
           clearCart();
+
           setTimeout(() => {
             navigate('/order-confirmation', {
               state: { orderId: order.id, orderNumber: order.order_number }
@@ -109,6 +111,7 @@ export default function PaymentCallback() {
         setStatus('success');
         setOrderNumber(order.order_number);
         clearCart();
+
         setTimeout(() => {
           navigate('/order-confirmation', {
             state: { orderId: order.id, orderNumber: order.order_number }

@@ -3,8 +3,8 @@ import { Link, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   LayoutDashboard, Package, ShoppingBag, LogOut, ChefHat,
   MessageCircle, Receipt, Database, Monitor, CircleUser as UserCircle,
-  Settings, Lock, Menu, X, ChevronLeft, ChevronRight, KeyRound,
-  ExternalLink, Search, Layers, ShieldCheck, Wallet, Code, Server
+  Settings, Lock, Key, Menu, X, ChevronLeft, ChevronRight, KeyRound,
+  ExternalLink, Search, Layers, ShieldCheck, Wallet
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { useUserRole } from '../hooks/useUserRole';
@@ -48,16 +48,10 @@ const NAV_GROUPS = [
     ],
   },
   {
-    label: 'Integrations',
-    items: [
-      { path: '/admin/rest-api', icon: Code, label: 'REST API Keys' },
-      { path: '/admin/ultimatepos', icon: Server, label: 'UltimatePOS' },
-    ],
-  },
-  {
     label: 'System',
     items: [
       { path: '/admin/messaging', icon: MessageCircle, label: 'Messaging' },
+      { path: '/admin/api-keys', icon: Key, label: 'API Keys' },
       { path: '/admin/settings', icon: Settings, label: 'Settings', requireSettingsEdit: true },
       { path: '/admin/backup', icon: Database, label: 'Backup & Restore', adminOnly: true },
     ],
